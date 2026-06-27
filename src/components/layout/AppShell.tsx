@@ -1,7 +1,9 @@
 'use client'
+import { useEffect } from 'react'
 import Sidebar from './Sidebar'
 import Header from './Header'
 import AIChatButton from './AIChatButton'
+import { useFinancialStore } from '@/store/financial-store'
 
 interface Props {
   children: React.ReactNode
@@ -9,6 +11,12 @@ interface Props {
 }
 
 export default function AppShell({ children, title }: Props) {
+  const { dbLoaded, loadFromDB } = useFinancialStore()
+
+  useEffect(() => {
+    if (!dbLoaded) loadFromDB()
+  }, [dbLoaded, loadFromDB])
+
   return (
     <div className="min-h-screen flex">
       <Sidebar />

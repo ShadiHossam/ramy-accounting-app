@@ -1,9 +1,8 @@
 'use client'
 import { useCallback, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { parseExcelFile, mergeTransactions } from '@/lib/excel-parser'
+import { parseExcelFile } from '@/lib/excel-parser'
 import { useFinancialStore } from '@/store/financial-store'
-import { allTimePeriod } from '@/lib/period-utils'
 import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, X, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -11,7 +10,7 @@ type UploadState = 'idle' | 'dragging' | 'parsing' | 'success' | 'error'
 
 export default function UploadPage() {
   const router = useRouter()
-  const { transactions: existing, setTransactions, addTransactions, setPeriod } = useFinancialStore()
+  const { transactions: existing, loadFromDB } = useFinancialStore()
   const [state, setState] = useState<UploadState>('idle')
   const [message, setMessage] = useState('')
   const [stats, setStats] = useState<{ newCount: number; dupCount: number; total: number; skippedRows: number } | null>(null)
@@ -39,16 +38,21 @@ export default function UploadPage() {
         return
       }
 
-      if (mergeMode === 'replace' || existing.length === 0) {
-        setTransactions(result.transactions)
-        setPeriod(allTimePeriod(result.transactions))
-        setStats({ newCount: result.transactions.length, dupCount: 0, total: result.transactions.length, skippedRows: result.skippedRows })
-      } else {
-        const { merged, newCount, dupCount } = mergeTransactions(existing, result.transactions)
-        addTransactions(result.transactions)
-        setPeriod(allTimePeriod(merged))
-        setStats({ newCount, dupCount, total: merged.length, skippedRows: result.skippedRows })
-      }
+      setMessage('جاري حفظ البيانات في قاعدة البيانات...')
+
+      const res = await fetch('/api/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactions: result.transactions, mode: mergeMode }),
+      })
+
+      if (!res.ok) throw new Error('فشل الاتصال بقاعدة البيانات')
+
+      const { newCount, dupCount, total } = await res.json() as { newCount: number; dupCount: number; total: number }
+
+      // Reload all transactions from DB into the store
+      await loadFromDB()
+      setStats({ newCount, dupCount, total, skippedRows: result.skippedRows })
 
       setState('success')
       setMessage(`تم رفع الملف بنجاح: ${file.name}`)
@@ -57,9 +61,9 @@ export default function UploadPage() {
       setTimeout(() => router.push('/dashboard'), 2000)
     } catch {
       setState('error')
-      setMessage('حدث خطأ أثناء قراءة الملف')
+      setMessage('حدث خطأ أثناء قراءة الملف أو الاتصال بقاعدة البيانات')
     }
-  }, [existing, mergeMode, setTransactions, addTransactions, setPeriod, router])
+  }, [existing, mergeMode, loadFromDB, router])
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()

@@ -85,17 +85,9 @@ export default function SettingsPage() {
           </div>
 
           <div className="mt-4 bg-emerald-50 border border-emerald-100 rounded-lg p-3">
-            <p className="text-emerald-700 text-xs font-medium mb-1">✓ وضع Claude CLI مفعّل</p>
+            <p className="text-emerald-700 text-xs font-medium mb-1">✓ OpenRouter مفعّل</p>
             <p className="text-emerald-600 text-xs">
-              التطبيق يستخدم تلقائياً جلسة Claude CLI الخاصة بك بدون الحاجة لمفتاح API.
-              اترك الحقل فارغاً للاستمرار بهذا الوضع.
-            </p>
-          </div>
-          <div className="mt-3 bg-blue-50 border border-blue-100 rounded-lg p-3">
-            <p className="text-blue-700 text-xs">
-              عندما تحصل على مفتاح API: انتقل إلى{' '}
-              <span className="font-mono bg-blue-100 px-1 rounded">console.anthropic.com</span>{' '}
-              → API Keys → Create Key
+              التطبيق يستخدم OpenRouter تلقائياً — المفتاح مضبوط على الخادم ولا حاجة لإدخاله هنا.
             </p>
           </div>
         </div>

@@ -250,30 +250,69 @@ export function buildFinancialContext(transactions: Transaction[], period: Perio
   const bestMonth = monthly.reduce((best, m) => m.netProfit > best.netProfit ? m : best, monthly[0] ?? { label: '-', netProfit: 0 })
   const worstMonth = monthly.reduce((worst, m) => m.netProfit < worst.netProfit ? m : worst, monthly[0] ?? { label: '-', netProfit: 0 })
 
+  // Derived ratios
+  const expenseRatio = summary.netSales > 0 ? (summary.totalExpenses / summary.netSales * 100).toFixed(1) : '0'
+  const sellingRatio = summary.netSales > 0 ? (summary.sellingExpenses / summary.netSales * 100).toFixed(1) : '0'
+  const adminRatio = summary.netSales > 0 ? (summary.adminExpenses / summary.netSales * 100).toFixed(1) : '0'
+  const purchasesRatio = summary.netSales > 0 ? (summary.purchases / summary.netSales * 100).toFixed(1) : '0'
+
+  const profitableMonths = monthly.filter(m => m.netProfit > 0).length
+  const lossMonths = monthly.filter(m => m.netProfit < 0).length
+
+  const topSourceName = revSources.length > 0 ? revSources[0].name : '-'
+  const topSourcePct = revSources.length > 0 ? revSources[0].percentage.toFixed(1) : '0'
+
+  // MoM revenue growth for last 3 months
+  const recentMonths = monthly.slice(-4)
+  const momGrowth = recentMonths.slice(1).map((m, i) => {
+    const prev = recentMonths[i]
+    if (!prev || prev.revenue === 0) return `${m.label}: لا يوجد مقارنة`
+    const pct = ((m.revenue - prev.revenue) / prev.revenue * 100).toFixed(1)
+    return `${m.label}: ${Number(pct) >= 0 ? '+' : ''}${pct}%`
+  }).join('، ')
+
+  // Months with detailed margin
+  const monthlyDetail = monthly.map(m => {
+    const netSales = m.revenue - m.salesReturns
+    return `${m.label}: إيرادات ${formatCurrency(m.revenue)} | مصروفات ${formatCurrency(m.expenses + m.purchases)} | صافي ${formatCurrency(m.netProfit)} | هامش ${netSales > 0 ? (m.netProfit / netSales * 100).toFixed(1) : 0}%`
+  }).join('\n')
+
   return `
 البيانات المالية للفترة: ${period.label}
 ====================================
+## ملخص قائمة الدخل
 إجمالي الإيرادات: ${formatCurrency(summary.totalRevenue)}
 مردودات المبيعات: ${formatCurrency(summary.salesReturns)}
 صافي المبيعات: ${formatCurrency(summary.netSales)}
-تكلفة المشتريات: ${formatCurrency(summary.purchases)}
-مجمل الربح: ${formatCurrency(summary.grossProfit)} (${summary.grossMargin.toFixed(1)}%)
-إجمالي المصروفات: ${formatCurrency(summary.totalExpenses)}
-صافي الربح: ${formatCurrency(summary.netProfit)} (${summary.netMargin.toFixed(1)}%)
+تكلفة المشتريات: ${formatCurrency(summary.purchases)} (${purchasesRatio}% من صافي المبيعات)
+مجمل الربح: ${formatCurrency(summary.grossProfit)} | هامش الربح الإجمالي: ${summary.grossMargin.toFixed(1)}%
+إجمالي المصروفات التشغيلية: ${formatCurrency(summary.totalExpenses)} (${expenseRatio}% من صافي المبيعات)
+صافي الربح: ${formatCurrency(summary.netProfit)} | هامش الربح الصافي: ${summary.netMargin.toFixed(1)}%
 
+## نسب مالية رئيسية
+- نسبة المصروفات الكلية / الإيرادات: ${expenseRatio}%
+- نسبة مصروفات البيع والتسويق / الإيرادات: ${sellingRatio}%
+- نسبة المصروفات الإدارية / الإيرادات: ${adminRatio}%
+- نسبة تكلفة المشتريات / الإيرادات: ${purchasesRatio}%
+
+## تركيز الإيرادات
+المصدر الأول "${topSourceName}" يمثل ${topSourcePct}% من إجمالي الإيرادات
 أعلى مصادر الإيراد:
-${revSources.map((s, i) => `${i + 1}. ${s.name}: ${formatCurrency(s.amount)} (${s.percentage.toFixed(1)}%)`).join('\n')}
+${revSources.map((s, i) => `${i + 1}. ${s.name}: ${formatCurrency(s.amount)} (${s.percentage.toFixed(1)}%) — ${s.count} معاملة`).join('\n')}
 
-توزيع المصروفات:
-${expCats.map((e, i) => `${i + 1}. ${e.name}: ${formatCurrency(e.amount)} (${e.percentage.toFixed(1)}%)`).join('\n')}
-
-أعلى جهات الإيراد (تحليلي):
+## أعلى جهات الإيراد (تحليلي)
 ${topAnalytical.map((a, i) => `${i + 1}. ${a.name}: ${formatCurrency(a.amount)}`).join('\n')}
 
-أداء شهري:
-${monthly.map(m => `${m.label}: إيرادات ${formatCurrency(m.revenue)} - مصروفات ${formatCurrency(m.expenses)} - صافي ${formatCurrency(m.netProfit)}`).join('\n')}
+## توزيع المصروفات
+${expCats.map((e, i) => `${i + 1}. ${e.name}: ${formatCurrency(e.amount)} (${e.percentage.toFixed(1)}%)`).join('\n')}
 
-أفضل شهر: ${bestMonth.label} (${formatCurrency(bestMonth.netProfit)})
-أسوأ شهر: ${worstMonth.label} (${formatCurrency(worstMonth.netProfit)})
+## الأداء الشهري التفصيلي
+${monthlyDetail}
+
+## ملخص الأداء
+- إجمالي الأشهر: ${monthly.length} | مربحة: ${profitableMonths} | خاسرة: ${lossMonths}
+- أفضل شهر: ${bestMonth.label} (${formatCurrency(bestMonth.netProfit)})
+- أسوأ شهر: ${worstMonth.label} (${formatCurrency(worstMonth.netProfit)})
+- نمو الإيرادات الشهري (آخر فترة): ${momGrowth || 'لا يوجد بيانات كافية'}
 `
 }

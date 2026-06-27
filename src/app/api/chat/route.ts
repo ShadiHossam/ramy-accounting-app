@@ -1,34 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
-import { execSync } from 'child_process'
 
-function getCliAuthToken(): string | null {
-  try {
-    const raw = execSync('security find-generic-password -l "Claude Code-credentials" -w', { encoding: 'utf8' }).trim()
-    const creds = JSON.parse(raw)
-    return creds?.claudeAiOauth?.accessToken ?? null
-  } catch {
-    return null
-  }
-}
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const MODEL = 'meta-llama/llama-3.3-70b-instruct:free'
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, context, apiKey } = await req.json()
+    const { messages, context } = await req.json()
 
-    let client: Anthropic
-    if (apiKey) {
-      client = new Anthropic({ apiKey })
-    } else {
-      const authToken = getCliAuthToken()
-      if (!authToken) return NextResponse.json({ error: 'مفتاح API مطلوب أو قم بتسجيل الدخول عبر Claude CLI' }, { status: 400 })
-      client = new Anthropic({ authToken })
-    }
+    const apiKey = process.env.OPENROUTER_API_KEY
+    if (!apiKey) return NextResponse.json({ error: 'مفتاح OpenRouter API غير مضبوط على الخادم' }, { status: 500 })
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      system: `أنت مستشار مالي ذكي ومتخصص. لديك إمكانية الوصول الكامل للبيانات المالية التالية:
+    const res = await fetch(OPENROUTER_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 1024,
+        messages: [
+          {
+            role: 'system',
+            content: `أنت مستشار مالي ذكي ومتخصص. لديك إمكانية الوصول الكامل للبيانات المالية التالية:
 
 ${context}
 
@@ -38,14 +32,26 @@ ${context}
 - استخدم تنسيق الأرقام العربي (فواصل للآلاف)
 - إذا سُئلت عن شيء غير موجود في البيانات، اذكر ذلك بوضوح
 - يمكنك المقارنة والتحليل والتوقع`,
-      messages: messages,
+          },
+          ...messages,
+        ],
+      }),
     })
 
-    const reply = response.content[0].type === 'text' ? response.content[0].text : ''
+    if (!res.ok) {
+      const body = await res.text()
+      let msg = 'خطأ من خادم OpenRouter'
+      if (res.status === 429) msg = 'تجاوزت حد الاستخدام المسموح به. حاول مرة أخرى لاحقاً.'
+      else if (res.status === 401) msg = 'مفتاح OpenRouter API غير صالح.'
+      console.error('OpenRouter error:', res.status, body)
+      return NextResponse.json({ error: msg }, { status: res.status })
+    }
+
+    const data = await res.json()
+    const reply: string = data.choices?.[0]?.message?.content ?? ''
     return NextResponse.json({ reply })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'خطأ غير معروف'
-    const status = (err as { status?: number }).status ?? 500
-    return NextResponse.json({ error: msg }, { status: status >= 400 && status < 600 ? status : 500 })
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

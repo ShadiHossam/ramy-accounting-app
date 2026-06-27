@@ -1,0 +1,23 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Transaction {
+  id          String   @id
+  date        DateTime
+  account     String   @db.VarChar(500)
+  subAccount  String   @db.VarChar(500)
+  analytical  String   @db.VarChar(500)
+  costCenter  String   @db.VarChar(500)
+  description String   @db.VarChar(1000)
+  amount      Float
+  createdAt   DateTime @default(now())
+
+  @@index([date])
+  @@index([account])
+}

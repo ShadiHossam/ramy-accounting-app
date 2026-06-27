@@ -20,8 +20,10 @@ interface FinancialStore {
   insights: SmartInsights | null
   apiKey: string
   balanceSheetInputs: BalanceSheetInputs
+  dbLoaded: boolean
   setTransactions: (t: Transaction[]) => void
   addTransactions: (t: Transaction[]) => void
+  loadFromDB: () => Promise<void>
   setPeriod: (p: PeriodFilter) => void
   setBudgets: (b: Budget[]) => void
   setInsights: (i: SmartInsights) => void
@@ -46,6 +48,7 @@ export const useFinancialStore = create<FinancialStore>()(
       insights: null,
       apiKey: '',
       balanceSheetInputs: defaultBalanceSheetInputs,
+      dbLoaded: false,
       setTransactions: (transactions) => {
         const period = allTimePeriod(transactions)
         set({ transactions, period, insights: null })
@@ -57,17 +60,23 @@ export const useFinancialStore = create<FinancialStore>()(
         const merged = [...existing, ...newOnes]
         set({ transactions: merged, insights: null })
       },
+      loadFromDB: async () => {
+        const res = await fetch('/api/transactions')
+        const { transactions } = await res.json() as { transactions: Array<{ id: string; date: string; account: string; subAccount: string; analytical: string; costCenter: string; description: string; amount: number }> }
+        const parsed = transactions.map(t => ({ ...t, date: new Date(t.date) }))
+        const period = parsed.length > 0 ? allTimePeriod(parsed) : defaultPeriod
+        set({ transactions: parsed, period, dbLoaded: true })
+      },
       setPeriod: (period) => set({ period }),
       setBudgets: (budgets) => set({ budgets }),
       setInsights: (insights) => set({ insights }),
       setApiKey: (apiKey) => set({ apiKey }),
       setBalanceSheetInputs: (inputs) => set(s => ({ balanceSheetInputs: { ...s.balanceSheetInputs, ...inputs } })),
-      clear: () => set({ transactions: [], period: defaultPeriod, insights: null }),
+      clear: () => set({ transactions: [], period: defaultPeriod, insights: null, dbLoaded: false }),
     }),
     {
       name: 'ramy-accounting',
       partialize: (state) => ({
-        transactions: state.transactions,
         budgets: state.budgets,
         apiKey: state.apiKey,
         balanceSheetInputs: state.balanceSheetInputs,

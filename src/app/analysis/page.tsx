@@ -130,7 +130,7 @@ export default function AnalysisPage() {
               ))}
             </div>
 
-            <div className="bg-white rounded-xl border border-gray-100 p-5">
+            <div className="bg-white rounded-xl border border-gray-100 p-5 overflow-x-auto">
               <h3 className="font-semibold text-gray-900 mb-4">جدول النسب المالية التفصيلي</h3>
               <table className="w-full text-sm">
                 <thead>

@@ -64,7 +64,7 @@ export default function AIChatButton() {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="fixed bottom-6 left-6 w-14 h-14 bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-full shadow-xl flex items-center justify-center hover:scale-110 transition-transform z-50"
+        className="fixed bottom-4 left-4 sm:bottom-6 sm:left-6 w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-full shadow-xl flex items-center justify-center hover:scale-110 transition-transform z-50"
         title="المساعد المالي الذكي"
       >
         <MessageCircle className="w-6 h-6" />
@@ -73,7 +73,7 @@ export default function AIChatButton() {
   }
 
   return (
-    <div className="fixed bottom-6 left-6 w-96 max-h-[600px] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col z-50">
+    <div className="fixed bottom-4 left-4 right-4 sm:right-auto sm:bottom-6 sm:left-6 sm:w-96 max-h-[calc(100vh-2rem)] sm:max-h-[600px] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col z-50">
       {/* Header */}
       <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-t-2xl p-4 flex items-center justify-between">
         <div className="flex items-center gap-2">

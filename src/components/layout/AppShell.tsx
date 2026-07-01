@@ -1,5 +1,5 @@
 'use client'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Sidebar from './Sidebar'
 import Header from './Header'
 import AIChatButton from './AIChatButton'
@@ -12,6 +12,7 @@ interface Props {
 
 export default function AppShell({ children, title }: Props) {
   const { dbLoaded, loadFromDB } = useFinancialStore()
+  const [menuOpen, setMenuOpen] = useState(false)
 
   useEffect(() => {
     if (!dbLoaded) loadFromDB()
@@ -19,10 +20,10 @@ export default function AppShell({ children, title }: Props) {
 
   return (
     <div className="min-h-screen flex">
-      <Sidebar />
-      <div className="flex-1 mr-64 flex flex-col min-h-screen">
-        <Header title={title} />
-        <main className="flex-1 p-6 overflow-auto">
+      <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
+      <div className="flex-1 lg:mr-64 flex flex-col min-h-screen">
+        <Header title={title} onMenuClick={() => setMenuOpen(true)} />
+        <main className="flex-1 p-4 sm:p-6 overflow-auto">
           {children}
         </main>
       </div>

@@ -4,7 +4,7 @@ import {
   todayPeriod, thisMonthPeriod, thisYearPeriod, allTimePeriod,
   customPeriod, yearPeriod, monthPeriod, getAvailableYears
 } from '@/lib/period-utils'
-import { Calendar, ChevronDown } from 'lucide-react'
+import { Calendar, ChevronDown, Menu } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 
@@ -13,9 +13,9 @@ const ARABIC_MONTHS = [
   'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
 ]
 
-interface Props { title: string }
+interface Props { title: string; onMenuClick: () => void }
 
-export default function Header({ title }: Props) {
+export default function Header({ title, onMenuClick }: Props) {
   const { period, setPeriod, transactions } = useFinancialStore()
   const [open, setOpen] = useState(false)
   const [customStart, setCustomStart] = useState('')
@@ -39,21 +39,29 @@ export default function Header({ title }: Props) {
   }
 
   return (
-    <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-      <h2 className="text-xl font-bold text-gray-900">{title}</h2>
+    <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-3 min-w-0">
+        <button
+          onClick={onMenuClick}
+          className="lg:hidden text-gray-600 hover:text-gray-900 p-1 -mr-1 flex-shrink-0"
+        >
+          <Menu className="w-6 h-6" />
+        </button>
+        <h2 className="text-lg sm:text-xl font-bold text-gray-900 truncate">{title}</h2>
+      </div>
 
-      <div className="relative" ref={ref}>
+      <div className="relative flex-shrink-0" ref={ref}>
         <button
           onClick={() => setOpen(!open)}
-          className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
+          className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-2.5 sm:px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
         >
           <Calendar className="w-4 h-4 text-gray-500" />
-          <span>{period.label}</span>
+          <span className="hidden sm:inline">{period.label}</span>
           <ChevronDown className={cn('w-4 h-4 text-gray-500 transition-transform', open && 'rotate-180')} />
         </button>
 
         {open && (
-          <div className="absolute left-0 mt-2 w-72 bg-white border border-gray-200 rounded-xl shadow-lg z-50 p-3">
+          <div className="absolute left-0 mt-2 w-[calc(100vw-2rem)] sm:w-72 max-w-72 bg-white border border-gray-200 rounded-xl shadow-lg z-50 p-3">
             <div className="space-y-1 mb-3">
               <p className="text-xs font-semibold text-gray-500 px-2 mb-2">فترات سريعة</p>
               {[

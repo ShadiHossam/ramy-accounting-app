@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 4353",
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate --schema=\"${INIT_CWD:-.}/prisma/schema.prisma\"",
     "build": "next build",
     "postbuild": "cp -r public .next/standalone/ && mkdir -p .next/standalone/.next && cp -r .next/static .next/standalone/.next/",
     "start": "next start",

@@ -4,9 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 4353",
+    "postinstall": "prisma generate",
     "build": "next build",
+    "postbuild": "cp -r public .next/standalone/ && mkdir -p .next/standalone/.next && cp -r .next/static .next/standalone/.next/",
     "start": "next start",
     "lint": "eslint"
+  },
+  "engines": {
+    "node": ">=18.18.0"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.105.0",

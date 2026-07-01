@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, TrendingUp, TrendingDown, FileText, Scale,
-  ArrowLeftRight, BarChart3, Users, Target, PieChart, Settings,
+  ArrowLeftRight, BarChart3, Users, Target, PieChart,
   Upload, Sparkles
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -21,7 +21,6 @@ const navItems = [
   { href: '/analysis', label: 'التحليل المالي', icon: BarChart3 },
   { href: '/budgeting', label: 'الميزانية التقديرية', icon: PieChart },
   { href: '/ai-insights', label: 'تقرير AI', icon: Sparkles },
-  { href: '/settings', label: 'الإعدادات', icon: Settings },
 ]
 
 export default function Sidebar() {

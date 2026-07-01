@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
     const groqKey = process.env.GROQ_API_KEY
     const openrouterKey = process.env.OPENROUTER_API_KEY
     if (!groqKey && !openrouterKey) {
-      return NextResponse.json({ error: 'مفتاح Groq أو OpenRouter API غير مضبوط على الخادم' }, { status: 500 })
+      return NextResponse.json({ error: 'الذكاء الاصطناعي غير مربوط بعد. تواصل مع الدعم الفني لتفعيله.' }, { status: 500 })
     }
 
     let lastStatus = 500
@@ -119,9 +119,10 @@ export async function POST(req: NextRequest) {
       if (lastStatus === 401) continue
     }
 
-    let msg = 'خطأ من خادم الذكاء الاصطناعي'
+    let msg = 'تعذر الاتصال بالذكاء الاصطناعي. حاول مرة أخرى لاحقاً.'
     if (lastStatus === 429) msg = 'جميع النماذج المجانية مشغولة حالياً. حاول مرة أخرى بعد دقيقة.'
-    else if (lastStatus === 401) msg = 'مفتاح API غير صالح.'
+    else if (lastStatus === 402) msg = 'الرصيد الخاص بمزوّد الذكاء الاصطناعي انتهى. تواصل مع الدعم لإضافة رصيد أو انتظر عودة النماذج المجانية.'
+    else if (lastStatus === 401) msg = 'مفتاح الذكاء الاصطناعي على الخادم غير صالح. تحتاج لإعادة ربط الذكاء الاصطناعي.'
     return NextResponse.json({ error: msg }, { status: lastStatus })
 
   } catch (err: unknown) {

@@ -26,7 +26,7 @@ interface FinancialStore {
   loadFromDB: () => Promise<void>
   setPeriod: (p: PeriodFilter) => void
   setBudgets: (b: Budget[]) => void
-  setInsights: (i: SmartInsights) => void
+  setInsights: (i: SmartInsights | null) => void
   setApiKey: (key: string) => void
   setBalanceSheetInputs: (inputs: Partial<BalanceSheetInputs>) => void
   clear: () => void

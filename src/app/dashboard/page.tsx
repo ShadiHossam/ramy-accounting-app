@@ -1,5 +1,5 @@
 'use client'
-import { useMemo, useEffect, useRef, useState } from 'react'
+import { useMemo, useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import AppShell from '@/components/layout/AppShell'
 import SummaryCard from '@/components/cards/SummaryCard'
@@ -10,12 +10,14 @@ import { calcSummary, calcMonthlyData, calcRevenueBySource, filterByPeriod, form
 import { TrendingUp, TrendingDown, DollarSign, Percent, AlertCircle, Lightbulb, Rocket, RefreshCw, Loader2 } from 'lucide-react'
 import { buildFinancialContext } from '@/lib/financial-engine'
 import ExportButton from '@/components/ui/ExportButton'
+import type { SmartInsights } from '@/lib/types'
 
 export default function DashboardPage() {
   const router = useRouter()
-  const { transactions, period, apiKey, insights, setInsights } = useFinancialStore()
+  const { transactions, period, insights, setInsights } = useFinancialStore()
   const insightsLoading = useRef(false)
   const [insightsLoadingState, setInsightsLoadingState] = useState(false)
+  const [insightsError, setInsightsError] = useState<string | null>(null)
 
   const filtered = useMemo(() => filterByPeriod(transactions, period), [transactions, period])
   const summary = useMemo(() => calcSummary(filtered), [filtered])
@@ -27,26 +29,34 @@ export default function DashboardPage() {
     [transactions]
   )
 
-  useEffect(() => {
-    if (insights || insightsLoading.current || filtered.length === 0) return
+  const loadInsights = useCallback(() => {
+    if (insightsLoading.current || filtered.length === 0) return
     insightsLoading.current = true
     setInsightsLoadingState(true)
+    setInsightsError(null)
 
     const context = buildFinancialContext(transactions, period)
     fetch('/api/insights', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ context, apiKey: apiKey || undefined }),
+      body: JSON.stringify({ context }),
     })
       .then(r => r.json())
       .then(data => {
         if (data.insights) setInsights({ ...data.insights, generatedAt: new Date() })
+        else setInsightsError(data.error || 'تعذر توليد تقرير الذكاء الاصطناعي.')
       })
+      .catch(() => setInsightsError('تعذر الاتصال بخدمة الذكاء الاصطناعي. تحقق من اتصال الإنترنت.'))
       .finally(() => {
         insightsLoading.current = false
         setInsightsLoadingState(false)
       })
-  }, [apiKey, filtered.length, insights, period, setInsights, transactions])
+  }, [filtered.length, period, setInsights, transactions])
+
+  useEffect(() => {
+    if (insights) return
+    loadInsights()
+  }, [insights, loadInsights])
 
   const dashboardExcelSheets = useMemo(() => [
     {
@@ -107,8 +117,9 @@ export default function DashboardPage() {
         </div>
 
         {/* Smart Insights */}
-        <SmartInsightsPanel insights={insights} apiKey={apiKey} loading={insightsLoadingState} onRefresh={() => {
-          setInsights({ problems: [], suggestions: [], opportunities: [], generatedAt: new Date() })
+        <SmartInsightsPanel insights={insights} loading={insightsLoadingState} error={insightsError} onRefresh={() => {
+          setInsights(null)
+          loadInsights()
         }} />
 
         {/* Charts Row */}
@@ -181,19 +192,22 @@ export default function DashboardPage() {
   )
 }
 
-function SmartInsightsPanel({ insights, apiKey, loading, onRefresh }: {
-  insights: { problems: string[]; suggestions: string[]; opportunities: string[]; generatedAt: Date } | null
-  apiKey: string
+function SmartInsightsPanel({ insights, loading, error, onRefresh }: {
+  insights: SmartInsights | null
   loading: boolean
+  error: string | null
   onRefresh: () => void
 }) {
-  if (!apiKey) {
+  if (error) {
     return (
-      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-3">
-        <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0" />
-        <p className="text-amber-700 text-sm">
-          أضف مفتاح Anthropic API من <a href="/settings" className="underline font-medium">الإعدادات</a> لتفعيل تقرير الذكاء الاصطناعي التلقائي
-        </p>
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0" />
+          <p className="text-amber-700 text-sm">{error}</p>
+        </div>
+        <button onClick={onRefresh} className="text-amber-700 text-sm font-medium underline flex-shrink-0">
+          إعادة المحاولة
+        </button>
       </div>
     )
   }

@@ -8,17 +8,28 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Transaction {
-  id          String   @id
-  date        DateTime
-  account     String   @db.VarChar(500)
-  subAccount  String   @db.VarChar(500)
-  analytical  String   @db.VarChar(500)
-  costCenter  String   @db.VarChar(500)
-  description String   @db.VarChar(1000)
-  amount      Float
-  createdAt   DateTime @default(now())
+model MonthlyMetric {
+  id        String   @id
+  sheet     String   @db.VarChar(50)
+  category  String   @db.VarChar(200)
+  year      Int
+  month     Int
+  amount    Float
+  createdAt DateTime @default(now())
 
-  @@index([date])
-  @@index([account])
+  @@unique([sheet, category, year, month])
+  @@index([year, month])
+}
+
+model BalanceSheetLine {
+  id        String   @id
+  label     String   @db.VarChar(300)
+  code      String?  @db.VarChar(50)
+  section   String   @db.VarChar(20)
+  isTotal   Boolean  @default(false)
+  amount    Float
+  asOfDate  DateTime
+  createdAt DateTime @default(now())
+
+  @@index([asOfDate])
 }

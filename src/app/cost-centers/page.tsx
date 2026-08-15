@@ -4,14 +4,27 @@ import AppShell from '@/components/layout/AppShell'
 import { useFinancialStore } from '@/store/financial-store'
 import { calcCostCenters, filterByPeriod, formatCurrency } from '@/lib/financial-engine'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts'
+import { Building2 } from 'lucide-react'
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899']
 
 export default function CostCentersPage() {
-  const { transactions, period } = useFinancialStore()
-  const filtered = useMemo(() => filterByPeriod(transactions, period), [transactions, period])
+  const { metrics, period } = useFinancialStore()
+  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
   const centers = useMemo(() => calcCostCenters(filtered), [filtered])
   const total = centers.reduce((s, c) => s + c.amount, 0)
+
+  if (centers.length === 0) {
+    return (
+      <AppShell title="تحليل مراكز التكلفة">
+        <div className="flex flex-col items-center justify-center h-96 text-gray-400 bg-white rounded-xl border border-gray-100">
+          <Building2 className="w-16 h-16 mb-4 opacity-50" />
+          <p className="text-xl font-medium mb-2">لا توجد بيانات مراكز تكلفة</p>
+          <p className="text-sm">ملف البيانات المرفوع (الملخص الشهري) لا يحتوي على تفصيل حسب مركز التكلفة — فقط إجماليات شهرية</p>
+        </div>
+      </AppShell>
+    )
+  }
 
   return (
     <AppShell title="تحليل مراكز التكلفة">

@@ -9,8 +9,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 const COLORS = ['#10b981', '#6366f1', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#14b8a6', '#84cc16']
 
 export default function RevenuePage() {
-  const { transactions, period } = useFinancialStore()
-  const filtered = useMemo(() => filterByPeriod(transactions, period), [transactions, period])
+  const { metrics, period } = useFinancialStore()
+  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
   const bySrc = useMemo(() => calcRevenueBySource(filtered), [filtered])
   const byAgent = useMemo(() => calcRevenueByAnalytical(filtered), [filtered])
 
@@ -29,7 +29,7 @@ export default function RevenuePage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-xl border border-gray-100 p-5">
-            <h3 className="font-semibold text-gray-900 mb-4">توزيع مصادر الدخل (الحساب الفرعي)</h3>
+            <h3 className="font-semibold text-gray-900 mb-4">توزيع مصادر الدخل</h3>
             <PieBreakdown data={bySrc} />
           </div>
 
@@ -83,6 +83,7 @@ export default function RevenuePage() {
           </div>
         </div>
 
+        {byAgent.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-100 p-5">
           <h3 className="font-semibold text-gray-900 mb-4">أعلى جهات/مندوبين إيراداً (تحليلي)</h3>
           <div className="overflow-x-auto">
@@ -114,6 +115,7 @@ export default function RevenuePage() {
             </table>
           </div>
         </div>
+        )}
       </div>
     </AppShell>
   )

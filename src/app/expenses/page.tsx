@@ -9,8 +9,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 const COLORS = ['#ef4444', '#f97316', '#f59e0b', '#8b5cf6', '#6366f1', '#06b6d4', '#ec4899', '#10b981', '#14b8a6', '#84cc16']
 
 export default function ExpensesPage() {
-  const { transactions, period } = useFinancialStore()
-  const filtered = useMemo(() => filterByPeriod(transactions, period), [transactions, period])
+  const { metrics, period } = useFinancialStore()
+  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
   const byCat = useMemo(() => calcExpensesByCategory(filtered), [filtered])
   const byItem = useMemo(() => calcExpensesByAnalytical(filtered), [filtered])
 
@@ -33,15 +33,15 @@ export default function ExpensesPage() {
             <PieBreakdown data={byCat} />
           </div>
           <div className="bg-white rounded-xl border border-gray-100 p-5">
-            <h3 className="font-semibold text-gray-900 mb-4">أعلى بنود الصرف</h3>
+            <h3 className="font-semibold text-gray-900 mb-4">أعلى فئات الصرف</h3>
             <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={byItem.slice(0, 10)} layout="vertical" margin={{ right: 80 }}>
+              <BarChart data={byCat.slice(0, 10)} layout="vertical" margin={{ right: 80 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis type="number" tickFormatter={v => `${(v / 1000).toFixed(0)}ك`} tick={{ fontSize: 10 }} />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={110} />
                 <Tooltip formatter={(v) => [`${Number(v).toLocaleString('ar-EG')} ج.م`]} contentStyle={{ fontFamily: 'Cairo' }} />
                 <Bar dataKey="amount" radius={[0, 4, 4, 0]}>
-                  {byItem.slice(0, 10).map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                  {byCat.slice(0, 10).map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -78,6 +78,7 @@ export default function ExpensesPage() {
           </div>
         </div>
 
+        {byItem.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-100 p-5">
           <h3 className="font-semibold text-gray-900 mb-4">تفصيل أبواب الصرف (تحليلي)</h3>
           <div className="overflow-x-auto">
@@ -105,6 +106,7 @@ export default function ExpensesPage() {
             </table>
           </div>
         </div>
+        )}
       </div>
     </AppShell>
   )

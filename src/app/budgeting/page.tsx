@@ -1,5 +1,5 @@
 'use client'
-import { useMemo, useState, useRef } from 'react'
+import { useMemo, useState, useRef, useSyncExternalStore } from 'react'
 import AppShell from '@/components/layout/AppShell'
 import { useFinancialStore } from '@/store/financial-store'
 import { calcExpensesByCategory, calcRevenueBySource, filterByPeriod, formatCurrency } from '@/lib/financial-engine'
@@ -15,23 +15,54 @@ interface BudgetRow {
   budgetAmount: number
 }
 
+const BUDGETS_KEY = 'ramy-budgets'
+const BUDGETS_EVENT = 'ramy-budgets-changed'
+const EMPTY_BUDGETS: BudgetRow[] = []
+
+// Reads localStorage through useSyncExternalStore instead of a useState initializer + effect
+// so the server snapshot ([]) and the client's first-paint snapshot are reconciled the way
+// React expects for external stores — a plain useEffect that calls setState on mount hits
+// this project's react-hooks/set-state-in-effect lint rule and (more importantly) still
+// flashes the wrong content for one render. Caches the parsed array so repeated calls with
+// unchanged localStorage content return the same reference (required by useSyncExternalStore
+// to avoid infinite re-render loops).
+let cachedRaw: string | null = null
+let cachedParsed: BudgetRow[] = EMPTY_BUDGETS
+function readBudgets(): BudgetRow[] {
+  const raw = localStorage.getItem(BUDGETS_KEY) ?? '[]'
+  if (raw !== cachedRaw) {
+    cachedRaw = raw
+    try { cachedParsed = JSON.parse(raw) } catch { cachedParsed = EMPTY_BUDGETS }
+  }
+  return cachedParsed
+}
+function subscribeBudgets(callback: () => void) {
+  window.addEventListener('storage', callback)
+  window.addEventListener(BUDGETS_EVENT, callback)
+  return () => {
+    window.removeEventListener('storage', callback)
+    window.removeEventListener(BUDGETS_EVENT, callback)
+  }
+}
+function getServerBudgets() {
+  return EMPTY_BUDGETS
+}
+
 export default function BudgetingPage() {
-  const { transactions, period } = useFinancialStore()
-  const filtered = useMemo(() => filterByPeriod(transactions, period), [transactions, period])
+  const { metrics, period } = useFinancialStore()
+  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
   const revSources = useMemo(() => calcRevenueBySource(filtered), [filtered])
   const expCats = useMemo(() => calcExpensesByCategory(filtered), [filtered])
   const printRef = useRef<HTMLDivElement>(null)
 
-  const [budgets, setBudgets] = useState<BudgetRow[]>(() => {
-    try { return JSON.parse(localStorage.getItem('ramy-budgets') ?? '[]') } catch { return [] }
-  })
+  const budgets = useSyncExternalStore(subscribeBudgets, readBudgets, getServerBudgets)
   const [newLabel, setNewLabel] = useState('')
   const [newType, setNewType] = useState<'revenue' | 'expense'>('revenue')
   const [newAmount, setNewAmount] = useState('')
 
   const saveBudgets = (b: BudgetRow[]) => {
-    setBudgets(b)
-    localStorage.setItem('ramy-budgets', JSON.stringify(b))
+    localStorage.setItem(BUDGETS_KEY, JSON.stringify(b))
+    window.dispatchEvent(new Event(BUDGETS_EVENT))
   }
 
   const totalBudgetRev = budgets.filter(b => b.type === 'revenue').reduce((s, b) => s + b.budgetAmount, 0)
@@ -51,7 +82,7 @@ export default function BudgetingPage() {
 
   const addRow = () => {
     if (!newLabel.trim() || !newAmount) return
-    saveBudgets([...budgets, { id: Date.now().toString(), category: newLabel.trim(), type: newType, budgetAmount: parseFloat(newAmount) || 0 }])
+    saveBudgets([...budgets, { id: crypto.randomUUID(), category: newLabel.trim(), type: newType, budgetAmount: parseFloat(newAmount) || 0 }])
     setNewLabel(''); setNewAmount('')
   }
 
@@ -220,7 +251,7 @@ export default function BudgetingPage() {
               <button key={src.name}
                 onClick={() => {
                   if (budgets.find(b => b.category === src.name)) return
-                  saveBudgets([...budgets, { id: Date.now().toString(), category: src.name, type: 'revenue', budgetAmount: src.amount }])
+                  saveBudgets([...budgets, { id: crypto.randomUUID(), category: src.name, type: 'revenue', budgetAmount: src.amount }])
                 }}
                 className="text-right text-xs border border-gray-200 rounded-lg px-3 py-2 hover:border-emerald-400 hover:bg-emerald-50 transition-colors">
                 <p className="text-gray-700 font-medium truncate">{src.name}</p>

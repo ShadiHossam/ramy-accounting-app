@@ -13,19 +13,19 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import ExportButton from '@/components/ui/ExportButton'
 
 export default function AnalysisPage() {
-  const { transactions, period } = useFinancialStore()
+  const { metrics, period } = useFinancialStore()
   const [activeTab, setActiveTab] = useState<'ratios' | 'trend' | 'horizontal' | 'seasonal'>('ratios')
 
-  const filtered = useMemo(() => filterByPeriod(transactions, period), [transactions, period])
+  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
   const s = useMemo(() => calcSummary(filtered), [filtered])
   const monthly = useMemo(() => calcMonthlyData(filtered), [filtered])
 
-  const years = getAvailableYears(transactions)
+  const years = getAvailableYears(metrics)
   const [year1, setYear1] = useState<number>(years[0] ?? new Date().getFullYear())
   const [year2, setYear2] = useState<number>(years[1] ?? new Date().getFullYear() - 1)
 
-  const data1 = useMemo(() => calcMonthlyData(filterByPeriod(transactions, yearPeriod(year1))), [transactions, year1])
-  const data2 = useMemo(() => calcMonthlyData(filterByPeriod(transactions, yearPeriod(year2))), [transactions, year2])
+  const data1 = useMemo(() => calcMonthlyData(filterByPeriod(metrics, yearPeriod(year1))), [metrics, year1])
+  const data2 = useMemo(() => calcMonthlyData(filterByPeriod(metrics, yearPeriod(year2))), [metrics, year2])
   const horizontal = useMemo(() => calcHorizontalAnalysis(data1, data2), [data1, data2])
 
   const [variableCostPct, setVariableCostPct] = useState(30)

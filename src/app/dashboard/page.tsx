@@ -14,19 +14,19 @@ import type { SmartInsights } from '@/lib/types'
 
 export default function DashboardPage() {
   const router = useRouter()
-  const { transactions, period, insights, setInsights } = useFinancialStore()
+  const { metrics, period, insights, setInsights } = useFinancialStore()
   const insightsLoading = useRef(false)
   const [insightsLoadingState, setInsightsLoadingState] = useState(false)
   const [insightsError, setInsightsError] = useState<string | null>(null)
 
-  const filtered = useMemo(() => filterByPeriod(transactions, period), [transactions, period])
+  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
   const summary = useMemo(() => calcSummary(filtered), [filtered])
   const monthly = useMemo(() => calcMonthlyData(filtered), [filtered])
   const revSources = useMemo(() => calcRevenueBySource(filtered), [filtered])
 
-  const recentTransactions = useMemo(() =>
-    [...transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 10),
-    [transactions]
+  const recentMonths = useMemo(() =>
+    [...monthly].sort((a, b) => b.month.localeCompare(a.month)).slice(0, 10),
+    [monthly]
   )
 
   const loadInsights = useCallback(() => {
@@ -35,7 +35,7 @@ export default function DashboardPage() {
     setInsightsLoadingState(true)
     setInsightsError(null)
 
-    const context = buildFinancialContext(transactions, period)
+    const context = buildFinancialContext(metrics, period)
     fetch('/api/insights', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -51,7 +51,7 @@ export default function DashboardPage() {
         insightsLoading.current = false
         setInsightsLoadingState(false)
       })
-  }, [filtered.length, period, setInsights, transactions])
+  }, [filtered.length, period, setInsights, metrics])
 
   useEffect(() => {
     if (insights) return
@@ -85,7 +85,7 @@ export default function DashboardPage() {
     },
   ], [summary, monthly, period.label])
 
-  if (transactions.length === 0) {
+  if (metrics.length === 0) {
     return (
       <AppShell title="لوحة التحكم">
         <div className="flex flex-col items-center justify-center h-96 text-gray-400">
@@ -155,32 +155,26 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Recent Transactions */}
+        {/* Recent Months */}
         <div className="bg-white rounded-xl border border-gray-100 p-5">
-          <h3 className="font-semibold text-gray-900 mb-4">آخر 10 حركات</h3>
+          <h3 className="font-semibold text-gray-900 mb-4">آخر الأشهر المحمّلة</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-gray-400 text-xs border-b border-gray-100">
-                  <th className="text-right pb-2 font-medium">التاريخ</th>
-                  <th className="text-right pb-2 font-medium">الحساب</th>
-                  <th className="text-right pb-2 font-medium">الحساب الفرعي</th>
-                  <th className="text-right pb-2 font-medium">البيان</th>
-                  <th className="text-left pb-2 font-medium">المبلغ</th>
+                  <th className="text-right pb-2 font-medium">الشهر</th>
+                  <th className="text-right pb-2 font-medium">الإيرادات</th>
+                  <th className="text-right pb-2 font-medium">المصروفات</th>
+                  <th className="text-left pb-2 font-medium">صافي الربح</th>
                 </tr>
               </thead>
               <tbody>
-                {recentTransactions.map((t, i) => (
-                  <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="py-2 text-gray-500">{new Date(t.date).toLocaleDateString('ar-EG')}</td>
-                    <td className="py-2">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${t.account === 'ايرادات' ? 'bg-emerald-50 text-emerald-700' : t.account === 'مصروفات' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
-                        {t.account}
-                      </span>
-                    </td>
-                    <td className="py-2 text-gray-600 text-xs">{t.subAccount}</td>
-                    <td className="py-2 text-gray-700 max-w-[200px] truncate">{t.description}</td>
-                    <td className="py-2 text-left font-medium text-gray-900">{t.amount.toLocaleString('ar-EG')} ج.م</td>
+                {recentMonths.map((m) => (
+                  <tr key={m.month} className="border-b border-gray-50 hover:bg-gray-50">
+                    <td className="py-2 text-gray-700 font-medium">{m.label}</td>
+                    <td className="py-2 text-emerald-600">{m.revenue.toLocaleString('ar-EG')} ج.م</td>
+                    <td className="py-2 text-red-500">{(m.expenses + m.purchases).toLocaleString('ar-EG')} ج.م</td>
+                    <td className={`py-2 text-left font-medium ${m.netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{m.netProfit.toLocaleString('ar-EG')} ج.م</td>
                   </tr>
                 ))}
               </tbody>

@@ -2,7 +2,7 @@
 import { useFinancialStore } from '@/store/financial-store'
 import {
   todayPeriod, thisMonthPeriod, thisYearPeriod, allTimePeriod,
-  customPeriod, yearPeriod, monthPeriod, getAvailableYears
+  customPeriod, yearPeriod, monthPeriod, getAvailableYears, parseLocalDateInput
 } from '@/lib/period-utils'
 import { Calendar, ChevronDown, Menu } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
@@ -16,12 +16,12 @@ const ARABIC_MONTHS = [
 interface Props { title: string; onMenuClick: () => void }
 
 export default function Header({ title, onMenuClick }: Props) {
-  const { period, setPeriod, transactions } = useFinancialStore()
+  const { period, setPeriod, metrics } = useFinancialStore()
   const [open, setOpen] = useState(false)
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const ref = useRef<HTMLDivElement>(null)
-  const years = getAvailableYears(transactions)
+  const years = getAvailableYears(metrics)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -33,7 +33,10 @@ export default function Header({ title, onMenuClick }: Props) {
 
   const applyCustom = () => {
     if (customStart && customEnd) {
-      setPeriod(customPeriod(new Date(customStart), new Date(customEnd)))
+      const start = parseLocalDateInput(customStart)
+      const end = parseLocalDateInput(customEnd)
+      end.setHours(23, 59, 59)
+      setPeriod(customPeriod(start, end))
       setOpen(false)
     }
   }
@@ -68,7 +71,7 @@ export default function Header({ title, onMenuClick }: Props) {
                 { label: 'اليوم', action: () => setPeriod(todayPeriod()) },
                 { label: 'هذا الشهر', action: () => setPeriod(thisMonthPeriod()) },
                 { label: 'هذه السنة', action: () => setPeriod(thisYearPeriod()) },
-                { label: 'كل الفترات', action: () => setPeriod(allTimePeriod(transactions)) },
+                { label: 'كل الفترات', action: () => setPeriod(allTimePeriod(metrics)) },
               ].map(({ label, action }) => (
                 <button
                   key={label}

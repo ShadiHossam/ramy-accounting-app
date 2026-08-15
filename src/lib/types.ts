@@ -1,21 +1,25 @@
-export interface Transaction {
-  date: Date
-  account: string
-  subAccount: string
-  analytical: string
-  costCenter: string
-  description: string
+export type SheetName = 'مصروفات' | 'ورقة2' | 'دخل'
+
+export interface MonthlyMetric {
+  id: string
+  sheet: SheetName
+  category: string
+  year: number
+  month: number // 1-12
   amount: number
-  id: string // unique key for dedup
 }
 
-export type AccountType =
-  | 'ايرادات'
-  | 'مصروفات'
-  | 'مشتريات'
-  | 'اصول ثابتة'
-  | 'مردودات المبيعات'
-  | 'مصلحة الضرائب'
+export type BalanceSheetSection = 'assets' | 'liabilities' | 'equity'
+
+export interface BalanceSheetLine {
+  id: string
+  label: string
+  code: string | null
+  section: BalanceSheetSection
+  isTotal: boolean
+  amount: number
+  asOfDate: Date
+}
 
 export interface FinancialSummary {
   totalRevenue: number
@@ -32,7 +36,6 @@ export interface FinancialSummary {
   taxExpenses: number
   netProfit: number
   netMargin: number
-  fixedAssets: number
 }
 
 export interface MonthlyData {
@@ -46,15 +49,6 @@ export interface MonthlyData {
   grossProfit: number
   grossMargin: number // %
   netMargin: number   // %
-}
-
-export interface BalanceSheetInputs {
-  cash: number
-  receivables: number
-  inventory: number
-  capital: number
-  shortTermDebt: number
-  longTermDebt: number
 }
 
 export interface CategoryBreakdown {
@@ -77,7 +71,18 @@ export interface Budget {
   budgetAmount: number
 }
 
+export interface SmartInsightKpi {
+  name: string
+  value: string
+  status: 'good' | 'warning' | 'danger'
+  comment: string
+}
+
 export interface SmartInsights {
+  period?: string
+  summary?: string
+  alerts?: string[]
+  kpis?: SmartInsightKpi[]
   problems: string[]
   suggestions: string[]
   opportunities: string[]

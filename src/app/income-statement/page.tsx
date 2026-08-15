@@ -9,9 +9,9 @@ import WaterfallChart from '@/components/charts/WaterfallChart'
 import ExportButton from '@/components/ui/ExportButton'
 
 export default function IncomeStatementPage() {
-  const { transactions, period } = useFinancialStore()
+  const { metrics, period } = useFinancialStore()
   const printRef = useRef<HTMLDivElement>(null)
-  const filtered = useMemo(() => filterByPeriod(transactions, period), [transactions, period])
+  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
   const s = useMemo(() => calcSummary(filtered), [filtered])
   const monthly = useMemo(() => calcMonthlyData(filtered), [filtered])
 
@@ -26,7 +26,9 @@ export default function IncomeStatementPage() {
     { label: 'مصروفات عمومية وإدارية', value: s.adminExpenses, level: 1, isTotal: false, color: 'text-red-500', deduct: true },
     { label: 'مصروفات التشغيل', value: s.operatingExpenses, level: 1, isTotal: false, color: 'text-red-500', deduct: true },
     ...(s.otherExpenses > 0 ? [{ label: 'مصروفات أخرى (غير مصنّفة)', value: s.otherExpenses, level: 1, isTotal: false, color: 'text-red-500', deduct: true }] : []),
-    { label: 'إجمالي المصروفات', value: s.totalExpenses, level: 0, isTotal: true, color: 'text-red-600' },
+    // Excludes tax (matches the itemized rows above it) so مجمل الربح − هذا السطر = صافي الربح قبل الضريبة exactly.
+    // s.totalExpenses (which includes tax) is used for the headline KPI elsewhere, not here.
+    { label: 'إجمالي المصروفات التشغيلية', value: s.totalExpenses - s.taxExpenses, level: 0, isTotal: true, color: 'text-red-600' },
     { label: 'صافي الربح قبل الضريبة', value: s.netProfit + s.taxExpenses, level: 0, isTotal: true, color: 'text-gray-900' },
     { label: 'ضرائب (مصلحة الضرائب)', value: s.taxExpenses, level: 1, isTotal: false, color: 'text-red-500', deduct: true },
     { label: 'صافي الربح', value: s.netProfit, level: 0, isTotal: true, color: s.netProfit >= 0 ? 'text-emerald-700' : 'text-red-700', highlight: true, big: true },

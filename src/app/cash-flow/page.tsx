@@ -8,17 +8,26 @@ import TrendLine from '@/components/charts/TrendLine'
 import ExportButton from '@/components/ui/ExportButton'
 
 export default function CashFlowPage() {
-  const { transactions, period } = useFinancialStore()
-  const filtered = useMemo(() => filterByPeriod(transactions, period), [transactions, period])
+  const { metrics, period } = useFinancialStore()
+  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
   const s = useMemo(() => calcSummary(filtered), [filtered])
   const monthly = useMemo(() => calcMonthlyData(filtered), [filtered])
 
   const [newLoans, setNewLoans] = useState(0)
   const [loanRepayments, setLoanRepayments] = useState(0)
   const [dividends, setDividends] = useState(0)
+  // No per-period fixed-asset purchase flow exists in the monthly-summary workbook (only a
+  // balance-sheet snapshot) — entered manually here, same pattern as the other financing/
+  // investing adjustments above.
+  const [fixedAssetPurchases, setFixedAssetPurchases] = useState(0)
 
-  const operatingCF = s.netProfit + s.salesReturns
-  const investingCF = -s.fixedAssets
+  // netProfit already = totalRevenue - salesReturns - purchases - totalExpenses, so building
+  // the operating section from those same four components sums exactly to netProfit — the
+  // previous version started from netProfit *and* re-subtracted purchases/totalExpenses,
+  // double-deducting them (and adding salesReturns back for no reason), so the printed line
+  // items never summed to the "صافي تدفق التشغيل" total shown underneath.
+  const operatingCF = s.netProfit
+  const investingCF = -fixedAssetPurchases
   const financingCF = newLoans - loanRepayments - dividends
   const netCF = operatingCF + investingCF + financingCF
 
@@ -34,13 +43,13 @@ export default function CashFlowPage() {
 
   const cfRows = [
     { section: 'أنشطة التشغيل', items: [
-      { label: 'صافي الربح', value: s.netProfit },
-      { label: 'تعديل: مردودات المبيعات', value: s.salesReturns, note: 'استرداد نقدي' },
-      { label: 'تعديل: المشتريات المدفوعة', value: -s.purchases },
-      { label: 'تعديل: المصروفات المدفوعة', value: -s.totalExpenses },
+      { label: 'إجمالي الإيرادات', value: s.totalRevenue },
+      { label: 'مردودات المبيعات', value: -s.salesReturns },
+      { label: 'المشتريات المدفوعة', value: -s.purchases },
+      { label: 'المصروفات المدفوعة', value: -s.totalExpenses },
     ], total: operatingCF },
     { section: 'أنشطة الاستثمار', items: [
-      { label: 'شراء أصول ثابتة', value: -s.fixedAssets },
+      { label: 'شراء أصول ثابتة', value: -fixedAssetPurchases, input: cfInput(fixedAssetPurchases, setFixedAssetPurchases) },
     ], total: investingCF },
     { section: 'أنشطة التمويل', items: [
       { label: 'قروض جديدة', value: newLoans, input: cfInput(newLoans, setNewLoans) },
@@ -55,14 +64,14 @@ export default function CashFlowPage() {
       ['قائمة التدفق النقدي'],
       [],
       ['أنشطة التشغيل', ''],
-      ['صافي الربح', s.netProfit],
-      ['تعديل: مردودات المبيعات', s.salesReturns],
-      ['تعديل: المشتريات المدفوعة', -s.purchases],
-      ['تعديل: المصروفات المدفوعة', -s.totalExpenses],
+      ['إجمالي الإيرادات', s.totalRevenue],
+      ['مردودات المبيعات', -s.salesReturns],
+      ['المشتريات المدفوعة', -s.purchases],
+      ['المصروفات المدفوعة', -s.totalExpenses],
       ['صافي تدفق التشغيل', operatingCF],
       [],
       ['أنشطة الاستثمار', ''],
-      ['شراء أصول ثابتة', -s.fixedAssets],
+      ['شراء أصول ثابتة', -fixedAssetPurchases],
       ['صافي تدفق الاستثمار', investingCF],
       [],
       ['أنشطة التمويل', ''],
@@ -73,7 +82,7 @@ export default function CashFlowPage() {
       [],
       ['صافي التدفق النقدي الكلي', netCF],
     ] as (string | number | null)[][]
-  }], [s, operatingCF, investingCF, financingCF, netCF, newLoans, loanRepayments, dividends])
+  }], [s, operatingCF, investingCF, financingCF, netCF, newLoans, loanRepayments, dividends, fixedAssetPurchases])
 
   return (
     <AppShell title="قائمة التدفق النقدي">

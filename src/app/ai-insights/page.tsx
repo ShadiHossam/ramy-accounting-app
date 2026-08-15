@@ -52,7 +52,7 @@ function KpiCard({ kpi }: { kpi: KPI }) {
 }
 
 export default function AIInsightsPage() {
-  const { transactions } = useFinancialStore()
+  const { metrics } = useFinancialStore()
   const [insights, setInsights] = useState<Insights | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -62,20 +62,20 @@ export default function AIInsightsPage() {
   const [selYear, setSelYear] = useState<number>(new Date().getFullYear())
   const [selMonth, setSelMonth] = useState<number>(new Date().getMonth())
 
-  const availableYears = useMemo(() => getAvailableYears(transactions), [transactions])
+  const availableYears = useMemo(() => getAvailableYears(metrics), [metrics])
 
   const localPeriod: PeriodFilter = useMemo(() => {
     if (periodMode === 'year') return yearPeriod(selYear)
     if (periodMode === 'month') return monthPeriod(selYear, selMonth)
-    return allTimePeriod(transactions)
-  }, [periodMode, selYear, selMonth, transactions])
+    return allTimePeriod(metrics)
+  }, [periodMode, selYear, selMonth, metrics])
 
   const generate = async () => {
     if (loading) return
     setLoading(true)
     setError(null)
     try {
-      const context = buildFinancialContext(transactions, localPeriod)
+      const context = buildFinancialContext(metrics, localPeriod)
       const res = await fetch('/api/insights', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -92,7 +92,7 @@ export default function AIInsightsPage() {
     }
   }
 
-  const noData = transactions.length === 0
+  const noData = metrics.length === 0
 
   return (
     <AppShell title="تقرير الذكاء الاصطناعي">
@@ -304,14 +304,14 @@ export default function AIInsightsPage() {
         {!insights && !loading && !error && !noData && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             {[
-              { icon: AlertTriangle, color: 'red', label: 'مشاكل وتحديات' },
-              { icon: Lightbulb, color: 'blue', label: 'مقترحات تحسين' },
-              { icon: TrendingUp, color: 'emerald', label: 'فرص نمو' },
-            ].map(({ icon: Icon, color, label }) => (
-              <div key={label} className={`bg-white rounded-xl border border-${color}-100 p-5`}>
+              { icon: AlertTriangle, border: 'border-red-100', bg: 'bg-red-100', text: 'text-red-500', label: 'مشاكل وتحديات' },
+              { icon: Lightbulb, border: 'border-blue-100', bg: 'bg-blue-100', text: 'text-blue-500', label: 'مقترحات تحسين' },
+              { icon: TrendingUp, border: 'border-emerald-100', bg: 'bg-emerald-100', text: 'text-emerald-500', label: 'فرص نمو' },
+            ].map(({ icon: Icon, border, bg, text, label }) => (
+              <div key={label} className={`bg-white rounded-xl border ${border} p-5`}>
                 <div className="flex items-center gap-2 mb-4">
-                  <div className={`w-8 h-8 bg-${color}-100 rounded-lg flex items-center justify-center`}>
-                    <Icon className={`w-4 h-4 text-${color}-500`} />
+                  <div className={`w-8 h-8 ${bg} rounded-lg flex items-center justify-center`}>
+                    <Icon className={`w-4 h-4 ${text}`} />
                   </div>
                   <h3 className="font-semibold text-gray-900">{label}</h3>
                 </div>

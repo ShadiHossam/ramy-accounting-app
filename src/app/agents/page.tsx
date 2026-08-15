@@ -5,16 +5,29 @@ import { useFinancialStore } from '@/store/financial-store'
 import { calcRevenueByAnalytical, calcExpensesByAnalytical, calcParetoAnalysis, filterByPeriod, formatCurrency } from '@/lib/financial-engine'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts'
 import { cn } from '@/lib/utils'
+import { Users } from 'lucide-react'
 
 export default function AgentsPage() {
-  const { transactions, period } = useFinancialStore()
-  const filtered = useMemo(() => filterByPeriod(transactions, period), [transactions, period])
+  const { metrics, period } = useFinancialStore()
+  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
   const revByAgent = useMemo(() => calcRevenueByAnalytical(filtered), [filtered])
   const expByAgent = useMemo(() => calcExpensesByAnalytical(filtered), [filtered])
   const pareto = useMemo(() => calcParetoAnalysis(revByAgent), [revByAgent])
 
   const totalRev = revByAgent.reduce((s, r) => s + r.amount, 0)
   const top80 = pareto.filter(p => p.percentage <= 80)
+
+  if (revByAgent.length === 0 && expByAgent.length === 0) {
+    return (
+      <AppShell title="تحليل المندوبين والجهات (Pareto)">
+        <div className="flex flex-col items-center justify-center h-96 text-gray-400 bg-white rounded-xl border border-gray-100">
+          <Users className="w-16 h-16 mb-4 opacity-50" />
+          <p className="text-xl font-medium mb-2">لا توجد بيانات مندوبين/جهات</p>
+          <p className="text-sm">ملف البيانات المرفوع (الملخص الشهري) لا يحتوي على تفصيل حسب المندوب أو الجهة — فقط إجماليات شهرية</p>
+        </div>
+      </AppShell>
+    )
+  }
 
   return (
     <AppShell title="تحليل المندوبين والجهات (Pareto)">

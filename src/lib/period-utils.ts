@@ -29,15 +29,17 @@ export function thisYearPeriod(): PeriodFilter {
   return { type: 'year', startDate: start, endDate: end, label: `سنة ${now.getFullYear()}` }
 }
 
-export function allTimePeriod(transactions: { date: Date }[]): PeriodFilter {
-  if (transactions.length === 0) {
+export function allTimePeriod(metrics: { year: number; month: number }[]): PeriodFilter {
+  if (metrics.length === 0) {
     return { type: 'custom', startDate: new Date(2020, 0, 1), endDate: new Date(), label: 'كل الفترات' }
   }
-  const dates = transactions.map(t => new Date(t.date).getTime())
+  const keys = metrics.map(m => m.year * 12 + (m.month - 1))
+  const minKey = Math.min(...keys)
+  const maxKey = Math.max(...keys)
   return {
     type: 'custom',
-    startDate: new Date(Math.min(...dates)),
-    endDate: new Date(Math.max(...dates)),
+    startDate: new Date(Math.floor(minKey / 12), minKey % 12, 1),
+    endDate: new Date(Math.floor(maxKey / 12), (maxKey % 12) + 1, 0, 23, 59, 59),
     label: 'كل الفترات'
   }
 }
@@ -65,7 +67,20 @@ export function monthPeriod(year: number, month: number): PeriodFilter {
   }
 }
 
-export function getAvailableYears(transactions: { date: Date }[]): number[] {
-  const years = new Set(transactions.map(t => new Date(t.date).getFullYear()))
+export function getAvailableYears(metrics: { year: number }[]): number[] {
+  const years = new Set(metrics.map(m => m.year))
   return Array.from(years).sort((a, b) => b - a)
+}
+
+// Local (not UTC) YYYY-MM-DD key — transaction dates are stored at local midnight,
+// so grouping/deduping must use local date parts too or dates shift by a day near UTC boundaries.
+export function formatLocalDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// Parses a "YYYY-MM-DD" string (e.g. from <input type="date">) as local midnight,
+// matching how transaction dates are parsed — new Date(str) would parse it as UTC instead.
+export function parseLocalDateInput(value: string): Date {
+  const [y, m, d] = value.split('-').map(Number)
+  return new Date(y, m - 1, d)
 }

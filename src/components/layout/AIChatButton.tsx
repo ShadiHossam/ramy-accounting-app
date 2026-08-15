@@ -24,7 +24,7 @@ export default function AIChatButton() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const { transactions, period, apiKey } = useFinancialStore()
+  const { metrics, period } = useFinancialStore()
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -41,14 +41,13 @@ export default function AIChatButton() {
     setLoading(true)
 
     try {
-      const context = buildFinancialContext(transactions, period)
+      const context = buildFinancialContext(metrics, period)
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
           context,
-          apiKey: apiKey || undefined,
         }),
       })
       const data = await res.json()

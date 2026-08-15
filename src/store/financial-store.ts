@@ -1,35 +1,21 @@
 'use client'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { Transaction, PeriodFilter, Budget, SmartInsights, BalanceSheetInputs } from '@/lib/types'
+import { MonthlyMetric, BalanceSheetLine, PeriodFilter, Budget, SmartInsights } from '@/lib/types'
 import { allTimePeriod } from '@/lib/period-utils'
 
-const defaultBalanceSheetInputs: BalanceSheetInputs = {
-  cash: 0,
-  receivables: 0,
-  inventory: 0,
-  capital: 0,
-  shortTermDebt: 0,
-  longTermDebt: 0,
-}
-
 interface FinancialStore {
-  transactions: Transaction[]
+  metrics: MonthlyMetric[]
+  balanceSheet: BalanceSheetLine[]
   period: PeriodFilter
   budgets: Budget[]
   insights: SmartInsights | null
-  apiKey: string
-  balanceSheetInputs: BalanceSheetInputs
   dbLoaded: boolean
-  setTransactions: (t: Transaction[]) => void
-  addTransactions: (t: Transaction[]) => void
   loadFromDB: () => Promise<void>
   setPeriod: (p: PeriodFilter) => void
   setBudgets: (b: Budget[]) => void
   setInsights: (i: SmartInsights | null) => void
-  setApiKey: (key: string) => void
-  setBalanceSheetInputs: (inputs: Partial<BalanceSheetInputs>) => void
-  clear: () => void
+  clear: () => Promise<void>
 }
 
 const defaultPeriod: PeriodFilter = {
@@ -41,45 +27,46 @@ const defaultPeriod: PeriodFilter = {
 
 export const useFinancialStore = create<FinancialStore>()(
   persist(
-    (set, get) => ({
-      transactions: [],
+    (set) => ({
+      metrics: [],
+      balanceSheet: [],
       period: defaultPeriod,
       budgets: [],
       insights: null,
-      apiKey: '',
-      balanceSheetInputs: defaultBalanceSheetInputs,
       dbLoaded: false,
-      setTransactions: (transactions) => {
-        const period = allTimePeriod(transactions)
-        set({ transactions, period, insights: null })
-      },
-      addTransactions: (incoming) => {
-        const existing = get().transactions
-        const existingIds = new Set(existing.map(t => t.id))
-        const newOnes = incoming.filter(t => !existingIds.has(t.id))
-        const merged = [...existing, ...newOnes]
-        set({ transactions: merged, insights: null })
-      },
       loadFromDB: async () => {
-        const res = await fetch('/api/transactions')
-        const { transactions } = await res.json() as { transactions: Array<{ id: string; date: string; account: string; subAccount: string; analytical: string; costCenter: string; description: string; amount: number }> }
-        const parsed = transactions.map(t => ({ ...t, date: new Date(t.date) }))
-        const period = parsed.length > 0 ? allTimePeriod(parsed) : defaultPeriod
-        set({ transactions: parsed, period, dbLoaded: true })
+        try {
+          const res = await fetch('/api/financial-data')
+          if (!res.ok) throw new Error(`فشل تحميل البيانات (${res.status})`)
+          const { metrics, balanceSheet } = await res.json() as {
+            metrics: MonthlyMetric[]
+            balanceSheet: Array<Omit<BalanceSheetLine, 'asOfDate'> & { asOfDate: string }>
+          }
+          const parsedBalanceSheet = balanceSheet.map(b => ({ ...b, asOfDate: new Date(b.asOfDate) }))
+          const period = metrics.length > 0 ? allTimePeriod(metrics) : defaultPeriod
+          set({ metrics, balanceSheet: parsedBalanceSheet, period, dbLoaded: true })
+        } catch (err) {
+          // Leave dbLoaded false so AppShell retries loadFromDB the next time it mounts
+          // (e.g. navigating to another page), instead of permanently showing "no data".
+          console.error('loadFromDB failed:', err)
+        }
       },
       setPeriod: (period) => set({ period }),
       setBudgets: (budgets) => set({ budgets }),
       setInsights: (insights) => set({ insights }),
-      setApiKey: (apiKey) => set({ apiKey }),
-      setBalanceSheetInputs: (inputs) => set(s => ({ balanceSheetInputs: { ...s.balanceSheetInputs, ...inputs } })),
-      clear: () => set({ transactions: [], period: defaultPeriod, insights: null, dbLoaded: false }),
+      clear: async () => {
+        try {
+          await fetch('/api/financial-data', { method: 'DELETE' })
+        } catch (err) {
+          console.error('Failed to delete financial data from DB:', err)
+        }
+        set({ metrics: [], balanceSheet: [], period: defaultPeriod, insights: null, dbLoaded: true })
+      },
     }),
     {
       name: 'ramy-accounting',
       partialize: (state) => ({
         budgets: state.budgets,
-        apiKey: state.apiKey,
-        balanceSheetInputs: state.balanceSheetInputs,
       }),
     }
   )

@@ -4,7 +4,7 @@ import AppShell from '@/components/layout/AppShell'
 import TrendLine from '@/components/charts/TrendLine'
 import { useFinancialStore } from '@/store/financial-store'
 import {
-  calcSummary, calcMonthlyData, calcHorizontalAnalysis,
+  calcSummary, calcMonthlyData, calcHorizontalAnalysis, calcExpensesByCategory,
   filterByPeriod, formatCurrency
 } from '@/lib/financial-engine'
 import { yearPeriod, getAvailableYears } from '@/lib/period-utils'
@@ -13,32 +13,36 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import ExportButton from '@/components/ui/ExportButton'
 
 export default function AnalysisPage() {
-  const { metrics, period } = useFinancialStore()
+  const { entries, period } = useFinancialStore()
   const [activeTab, setActiveTab] = useState<'ratios' | 'trend' | 'horizontal' | 'seasonal'>('ratios')
 
-  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
+  const filtered = useMemo(() => filterByPeriod(entries, period), [entries, period])
   const s = useMemo(() => calcSummary(filtered), [filtered])
   const monthly = useMemo(() => calcMonthlyData(filtered), [filtered])
+  const expByAccount = useMemo(() => calcExpensesByCategory(filtered), [filtered])
 
-  const years = getAvailableYears(metrics)
+  const years = getAvailableYears(entries)
   const [year1, setYear1] = useState<number>(years[0] ?? new Date().getFullYear())
   const [year2, setYear2] = useState<number>(years[1] ?? new Date().getFullYear() - 1)
 
-  const data1 = useMemo(() => calcMonthlyData(filterByPeriod(metrics, yearPeriod(year1))), [metrics, year1])
-  const data2 = useMemo(() => calcMonthlyData(filterByPeriod(metrics, yearPeriod(year2))), [metrics, year2])
+  const data1 = useMemo(() => calcMonthlyData(filterByPeriod(entries, yearPeriod(year1))), [entries, year1])
+  const data2 = useMemo(() => calcMonthlyData(filterByPeriod(entries, yearPeriod(year2))), [entries, year2])
   const horizontal = useMemo(() => calcHorizontalAnalysis(data1, data2), [data1, data2])
 
+  // Break-even is explicitly a what-if tool: the variable-cost split is a percentage the USER
+  // sets on the slider below, not something derived or guessed from the source data — every
+  // account in a chart of accounts can carry both fixed and variable cost, and the file doesn't
+  // say which, so the app doesn't decide for you.
   const [variableCostPct, setVariableCostPct] = useState(30)
 
   const avgRevenue = monthly.length > 0 ? monthly.reduce((s, m) => s + m.revenue, 0) / monthly.length : 0
   const bestMonth = monthly.reduce((b, m) => m.netProfit > b.netProfit ? m : b, monthly[0] ?? { label: '-', netProfit: 0 })
   const worstMonth = monthly.reduce((w, m) => m.netProfit < w.netProfit ? m : w, monthly[0] ?? { label: '-', netProfit: 0 })
-  const totalOpEx = s.adminExpenses + s.sellingExpenses + s.operatingExpenses + s.otherExpenses
-  const variablePortion = totalOpEx * (variableCostPct / 100)
-  const fixedCosts = totalOpEx - variablePortion
-  const contributionMarginPct = s.netSales > 0
-    ? ((s.netSales - s.purchases - variablePortion) / s.netSales) * 100
-    : s.grossMargin
+  const variablePortion = s.totalExpenses * (variableCostPct / 100)
+  const fixedCosts = s.totalExpenses - variablePortion
+  const contributionMarginPct = s.totalRevenue > 0
+    ? ((s.totalRevenue - variablePortion) / s.totalRevenue) * 100
+    : 0
   const breakEvenRevenue = contributionMarginPct > 0 ? (fixedCosts / (contributionMarginPct / 100)) : 0
 
   const tabs = [
@@ -53,12 +57,13 @@ export default function AnalysisPage() {
       name: 'تحليل النسب',
       data: [
         ['النسبة', 'القيمة', 'طريقة الحساب'],
-        ['هامش الربح الإجمالي', `${s.grossMargin.toFixed(1)}%`, `${formatCurrency(s.grossProfit)} / ${formatCurrency(s.netSales)}`],
-        ['هامش صافي الربح', `${s.netMargin.toFixed(1)}%`, `${formatCurrency(s.netProfit)} / ${formatCurrency(s.netSales)}`],
-        ['نسبة تكلفة المبيعات', `${s.netSales > 0 ? ((s.purchases / s.netSales) * 100).toFixed(1) : 0}%`, ''],
-        ['نسبة مصروفات البيع', `${s.netSales > 0 ? ((s.sellingExpenses / s.netSales) * 100).toFixed(1) : 0}%`, ''],
-        ['نسبة المصروفات الإدارية', `${s.netSales > 0 ? ((s.adminExpenses / s.netSales) * 100).toFixed(1) : 0}%`, ''],
-        ['نسبة إجمالي المصروفات', `${s.netSales > 0 ? ((s.totalExpenses / s.netSales) * 100).toFixed(1) : 0}%`, ''],
+        ['هامش صافي الربح', `${s.netMargin.toFixed(1)}%`, `${formatCurrency(s.netProfit)} / ${formatCurrency(s.totalRevenue)}`],
+        ['نسبة إجمالي المصروفات', `${s.totalRevenue > 0 ? ((s.totalExpenses / s.totalRevenue) * 100).toFixed(1) : 0}%`, `${formatCurrency(s.totalExpenses)} / ${formatCurrency(s.totalRevenue)}`],
+        ...expByAccount.map(e => [
+          `نسبة ${e.name}`,
+          `${s.totalRevenue > 0 ? ((e.amount / s.totalRevenue) * 100).toFixed(1) : 0}%`,
+          `${formatCurrency(e.amount)} / ${formatCurrency(s.totalRevenue)}`,
+        ]),
       ] as (string | number | null)[][]
     }]
     if (activeTab === 'trend') return [{
@@ -117,10 +122,8 @@ export default function AnalysisPage() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                { label: 'هامش الربح الإجمالي', value: s.grossMargin, desc: 'مجمل الربح / صافي المبيعات', color: s.grossMargin >= 30 ? 'text-emerald-600' : 'text-orange-500' },
-                { label: 'هامش صافي الربح', value: s.netMargin, desc: 'صافي الربح / صافي المبيعات', color: s.netMargin >= 10 ? 'text-emerald-600' : 'text-red-500' },
-                { label: 'نسبة المصروفات', value: s.netSales > 0 ? (s.totalExpenses / s.netSales) * 100 : 0, desc: 'المصروفات / صافي المبيعات', color: 'text-red-500' },
-                { label: 'نسبة المشتريات', value: s.netSales > 0 ? (s.purchases / s.netSales) * 100 : 0, desc: 'المشتريات / صافي المبيعات', color: 'text-orange-500' },
+                { label: 'هامش صافي الربح', value: s.netMargin, desc: 'صافي الربح / إجمالي الإيرادات', color: s.netMargin >= 10 ? 'text-emerald-600' : 'text-red-500' },
+                { label: 'نسبة إجمالي المصروفات', value: s.totalRevenue > 0 ? (s.totalExpenses / s.totalRevenue) * 100 : 0, desc: 'إجمالي المصروفات / إجمالي الإيرادات', color: 'text-red-500' },
               ].map((r, i) => (
                 <div key={i} className="bg-white rounded-xl border border-gray-100 p-5">
                   <p className="text-gray-500 text-xs mb-2">{r.label}</p>
@@ -131,24 +134,25 @@ export default function AnalysisPage() {
             </div>
 
             <div className="bg-white rounded-xl border border-gray-100 p-5 overflow-x-auto">
-              <h3 className="font-semibold text-gray-900 mb-4">جدول النسب المالية التفصيلي</h3>
+              <h3 className="font-semibold text-gray-900 mb-1">جدول النسب المالية التفصيلي</h3>
+              <p className="text-gray-400 text-xs mb-4">نسبة كل حساب مصروفات فعلي من إجمالي الإيرادات — لا يوجد أي تصنيف/تجميع مُفترض</p>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-gray-400 text-xs">
                     <th className="text-right pb-3 font-medium">النسبة</th>
                     <th className="text-left pb-3 font-medium">القيمة</th>
                     <th className="text-right pb-3 font-medium">طريقة الحساب</th>
-                    <th className="text-left pb-3 font-medium">التقييم</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {[
-                    { name: 'هامش الربح الإجمالي', val: s.grossMargin, formula: `${formatCurrency(s.grossProfit)} / ${formatCurrency(s.netSales)}`, note: s.grossMargin >= 30 ? '✓ جيد' : '⚠ منخفض' },
-                    { name: 'هامش صافي الربح', val: s.netMargin, formula: `${formatCurrency(s.netProfit)} / ${formatCurrency(s.netSales)}`, note: s.netMargin >= 10 ? '✓ جيد' : '⚠ مراجعة' },
-                    { name: 'نسبة تكلفة المبيعات', val: s.netSales > 0 ? (s.purchases / s.netSales) * 100 : 0, formula: `${formatCurrency(s.purchases)} / ${formatCurrency(s.netSales)}`, note: '' },
-                    { name: 'نسبة مصروفات البيع', val: s.netSales > 0 ? (s.sellingExpenses / s.netSales) * 100 : 0, formula: `${formatCurrency(s.sellingExpenses)} / ${formatCurrency(s.netSales)}`, note: '' },
-                    { name: 'نسبة المصروفات الإدارية', val: s.netSales > 0 ? (s.adminExpenses / s.netSales) * 100 : 0, formula: `${formatCurrency(s.adminExpenses)} / ${formatCurrency(s.netSales)}`, note: '' },
-                    { name: 'نسبة إجمالي المصروفات', val: s.netSales > 0 ? (s.totalExpenses / s.netSales) * 100 : 0, formula: `${formatCurrency(s.totalExpenses)} / ${formatCurrency(s.netSales)}`, note: '' },
+                    { name: 'هامش صافي الربح', val: s.netMargin, formula: `${formatCurrency(s.netProfit)} / ${formatCurrency(s.totalRevenue)}` },
+                    { name: 'نسبة إجمالي المصروفات', val: s.totalRevenue > 0 ? (s.totalExpenses / s.totalRevenue) * 100 : 0, formula: `${formatCurrency(s.totalExpenses)} / ${formatCurrency(s.totalRevenue)}` },
+                    ...expByAccount.map(e => ({
+                      name: `نسبة ${e.name}`,
+                      val: s.totalRevenue > 0 ? (e.amount / s.totalRevenue) * 100 : 0,
+                      formula: `${formatCurrency(e.amount)} / ${formatCurrency(s.totalRevenue)}`,
+                    })),
                   ].map((r, i) => (
                     <tr key={i} className="hover:bg-gray-50">
                       <td className="py-3 font-medium text-gray-800">{r.name}</td>
@@ -156,7 +160,6 @@ export default function AnalysisPage() {
                         <span className={cn('text-lg font-bold', r.val >= 10 ? 'text-emerald-600' : 'text-orange-500')}>{r.val.toFixed(1)}%</span>
                       </td>
                       <td className="py-3 text-gray-500 text-xs">{r.formula}</td>
-                      <td className="py-3 text-left text-xs">{r.note}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -215,17 +218,15 @@ export default function AnalysisPage() {
         {/* Margin Trend */}
         {activeTab === 'trend' && monthly.length > 0 && (
           <div className="bg-white rounded-xl border border-gray-100 p-5">
-            <h3 className="font-semibold text-gray-900 mb-1">هوامش الربح الشهرية (%)</h3>
-            <p className="text-gray-400 text-xs mb-4">هامش مجمل الربح وصافي الربح بالنسبة المئوية شهرياً</p>
+            <h3 className="font-semibold text-gray-900 mb-1">هامش صافي الربح الشهري (%)</h3>
+            <p className="text-gray-400 text-xs mb-4">صافي الربح / الإيرادات لكل شهر</p>
             <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={monthly}>
+              <LineChart data={monthly.map(m => ({ ...m, netMargin: m.revenue > 0 ? (m.netProfit / m.revenue) * 100 : 0 }))}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="label" tick={{ fontSize: 9 }} angle={-30} textAnchor="end" height={55} />
                 <YAxis tickFormatter={v => `${v.toFixed(0)}%`} tick={{ fontSize: 10 }} />
                 <ReferenceLine y={0} stroke="#94a3b8" />
                 <Tooltip formatter={(v) => [`${(v as number).toFixed(1)}%`]} contentStyle={{ fontFamily: 'Cairo' }} />
-                <Legend formatter={(val) => val === 'grossMargin' ? 'هامش مجمل الربح' : 'هامش صافي الربح'} />
-                <Line type="monotone" dataKey="grossMargin" stroke="#10b981" strokeWidth={2} dot={false} name="grossMargin" />
                 <Line type="monotone" dataKey="netMargin" stroke="#6366f1" strokeWidth={2} dot={false} name="netMargin" />
               </LineChart>
             </ResponsiveContainer>
@@ -327,7 +328,7 @@ export default function AnalysisPage() {
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-semibold text-gray-900">نقطة التعادل (Break-Even)</h3>
               </div>
-              <p className="text-gray-400 text-xs mb-4">الحد الأدنى للإيراد لتغطية التكاليف الثابتة</p>
+              <p className="text-gray-400 text-xs mb-4">الحد الأدنى للإيراد لتغطية التكاليف الثابتة — أداة تقديرية بناءً على النسبة التي تحددها أنت أدناه، وليست مأخوذة من الملف</p>
 
               <div className="bg-gray-50 rounded-lg p-4 mb-4">
                 <div className="flex items-center justify-between mb-2">
@@ -359,8 +360,8 @@ export default function AnalysisPage() {
                   نقطة التعادل = {formatCurrency(breakEvenRevenue)} من الإيرادات
                 </p>
                 <p className="text-indigo-500 text-xs mt-1">
-                  {s.netSales > 0 && contributionMarginPct > 0
-                    ? `أنت ${s.netSales > breakEvenRevenue ? 'فوق' : 'تحت'} نقطة التعادل بفارق ${formatCurrency(Math.abs(s.netSales - breakEvenRevenue))}`
+                  {s.totalRevenue > 0 && contributionMarginPct > 0
+                    ? `أنت ${s.totalRevenue > breakEvenRevenue ? 'فوق' : 'تحت'} نقطة التعادل بفارق ${formatCurrency(Math.abs(s.totalRevenue - breakEvenRevenue))}`
                     : 'أدخل بيانات لحساب نقطة التعادل'}
                 </p>
               </div>

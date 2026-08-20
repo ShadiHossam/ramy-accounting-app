@@ -8,28 +8,37 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model MonthlyMetric {
-  id        String   @id
-  sheet     String   @db.VarChar(50)
-  category  String   @db.VarChar(200)
-  year      Int
-  month     Int
-  amount    Float
-  createdAt DateTime @default(now())
-
-  @@unique([sheet, category, year, month])
-  @@index([year, month])
+// دليل الحسابات (chart of accounts) — resolved at import time and denormalized onto each
+// JournalLine below, so every page reads accountName/accountType without a join.
+model Account {
+  code       Int      @id
+  name       String   @db.VarChar(200)
+  type       String   @db.VarChar(20)
+  parentCode Int?
+  level      Int
+  createdAt  DateTime @default(now())
 }
 
-model BalanceSheetLine {
-  id        String   @id
-  label     String   @db.VarChar(300)
-  code      String?  @db.VarChar(50)
-  section   String   @db.VarChar(20)
-  isTotal   Boolean  @default(false)
-  amount    Float
-  asOfDate  DateTime
-  createdAt DateTime @default(now())
+// One row of قيود اليومية — the raw ledger. All financial views are computed from this table,
+// never from a pre-aggregated/invented bucket.
+model JournalLine {
+  id             String   @id
+  entryNumber    Int
+  entryDate      DateTime
+  postingDate    DateTime
+  refNumber      String   @db.VarChar(100)
+  docType        String   @db.VarChar(100)
+  description    String   @db.VarChar(500)
+  accountCode    Int
+  accountName    String   @db.VarChar(200)
+  accountType    String   @db.VarChar(20)
+  costCenter     String   @db.VarChar(200)
+  debit          Float
+  credit         Float
+  approvalStatus String   @db.VarChar(50)
+  createdAt      DateTime @default(now())
 
-  @@index([asOfDate])
+  @@index([entryDate])
+  @@index([accountCode])
+  @@index([costCenter])
 }

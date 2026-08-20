@@ -9,8 +9,8 @@ import { Building2 } from 'lucide-react'
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899']
 
 export default function CostCentersPage() {
-  const { metrics, period } = useFinancialStore()
-  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
+  const { entries, period } = useFinancialStore()
+  const filtered = useMemo(() => filterByPeriod(entries, period), [entries, period])
   const centers = useMemo(() => calcCostCenters(filtered), [filtered])
   const total = centers.reduce((s, c) => s + c.amount, 0)
 
@@ -20,7 +20,7 @@ export default function CostCentersPage() {
         <div className="flex flex-col items-center justify-center h-96 text-gray-400 bg-white rounded-xl border border-gray-100">
           <Building2 className="w-16 h-16 mb-4 opacity-50" />
           <p className="text-xl font-medium mb-2">لا توجد بيانات مراكز تكلفة</p>
-          <p className="text-sm">ملف البيانات المرفوع (الملخص الشهري) لا يحتوي على تفصيل حسب مركز التكلفة — فقط إجماليات شهرية</p>
+          <p className="text-sm">لا توجد حركات مصروفات مرتبطة بمركز تكلفة في الفترة المختارة</p>
         </div>
       </AppShell>
     )

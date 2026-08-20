@@ -1,12 +1,12 @@
 'use client'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { MonthlyMetric, BalanceSheetLine, PeriodFilter, Budget, SmartInsights } from '@/lib/types'
+import { Account, JournalLine, PeriodFilter, Budget, SmartInsights } from '@/lib/types'
 import { allTimePeriod } from '@/lib/period-utils'
 
 interface FinancialStore {
-  metrics: MonthlyMetric[]
-  balanceSheet: BalanceSheetLine[]
+  accounts: Account[]
+  entries: JournalLine[]
   period: PeriodFilter
   budgets: Budget[]
   insights: SmartInsights | null
@@ -28,8 +28,8 @@ const defaultPeriod: PeriodFilter = {
 export const useFinancialStore = create<FinancialStore>()(
   persist(
     (set) => ({
-      metrics: [],
-      balanceSheet: [],
+      accounts: [],
+      entries: [],
       period: defaultPeriod,
       budgets: [],
       insights: null,
@@ -38,13 +38,13 @@ export const useFinancialStore = create<FinancialStore>()(
         try {
           const res = await fetch('/api/financial-data')
           if (!res.ok) throw new Error(`فشل تحميل البيانات (${res.status})`)
-          const { metrics, balanceSheet } = await res.json() as {
-            metrics: MonthlyMetric[]
-            balanceSheet: Array<Omit<BalanceSheetLine, 'asOfDate'> & { asOfDate: string }>
+          const { accounts, entries } = await res.json() as {
+            accounts: Account[]
+            entries: Array<Omit<JournalLine, 'entryDate' | 'postingDate'> & { entryDate: string; postingDate: string }>
           }
-          const parsedBalanceSheet = balanceSheet.map(b => ({ ...b, asOfDate: new Date(b.asOfDate) }))
-          const period = metrics.length > 0 ? allTimePeriod(metrics) : defaultPeriod
-          set({ metrics, balanceSheet: parsedBalanceSheet, period, dbLoaded: true })
+          const parsedEntries = entries.map(e => ({ ...e, entryDate: new Date(e.entryDate), postingDate: new Date(e.postingDate) }))
+          const period = parsedEntries.length > 0 ? allTimePeriod(parsedEntries) : defaultPeriod
+          set({ accounts, entries: parsedEntries, period, dbLoaded: true })
         } catch (err) {
           // Leave dbLoaded false so AppShell retries loadFromDB the next time it mounts
           // (e.g. navigating to another page), instead of permanently showing "no data".
@@ -60,7 +60,7 @@ export const useFinancialStore = create<FinancialStore>()(
         } catch (err) {
           console.error('Failed to delete financial data from DB:', err)
         }
-        set({ metrics: [], balanceSheet: [], period: defaultPeriod, insights: null, dbLoaded: true })
+        set({ accounts: [], entries: [], period: defaultPeriod, insights: null, dbLoaded: true })
       },
     }),
     {

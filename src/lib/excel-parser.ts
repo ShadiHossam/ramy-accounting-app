@@ -1,30 +1,14 @@
 import * as XLSX from 'xlsx'
-import { BalanceSheetSection, SheetName } from './types'
+import { Account, AccountType, JournalLine } from './types'
 
-export const ARABIC_MONTHS = [
-  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
-]
+const ACCOUNT_TYPES: AccountType[] = ['أصول', 'خصوم', 'حقوق ملكية', 'إيرادات', 'مصروفات']
 
-export interface ParsedMetric {
-  sheet: SheetName
-  category: string
-  month: number // 1-12
-  amount: number
-}
-
-export interface ParsedBalanceLine {
-  label: string
-  code: string | null
-  section: BalanceSheetSection
-  isTotal: boolean
-  amount: number
-}
+export interface ParsedAccount extends Account {}
+export interface ParsedJournalLine extends Omit<JournalLine, 'id'> {}
 
 export interface ParseResult {
-  metrics: ParsedMetric[]
-  balanceSheet: ParsedBalanceLine[]
-  asOfDate: Date | null
+  accounts: ParsedAccount[]
+  entries: ParsedJournalLine[]
   errors: string[]
 }
 
@@ -32,122 +16,158 @@ function isNum(v: unknown): v is number {
   return typeof v === 'number' && !isNaN(v)
 }
 
-function monthIndex(label: unknown): number {
-  return ARABIC_MONTHS.indexOf(String(label ?? '').trim())
+// SheetJS's Excel-serial→Date conversion can leave a few seconds of floating-point rounding
+// error, occasionally landing just before local midnight instead of exactly on it (observed:
+// a cell meaning "Aug 1 00:00:00" parsed as "Jul 31 23:59:48") — which silently drops the entry
+// into the wrong calendar month everywhere this app groups by month. Snapping to the nearest
+// calendar day corrects it without needing to touch timezone handling at all.
+function snapToDay(d: Date): Date {
+  const snapped = new Date(d)
+  if (snapped.getHours() >= 12) snapped.setDate(snapped.getDate() + 1)
+  snapped.setHours(0, 0, 0, 0)
+  return snapped
 }
 
-function stripTatweel(s: string): string {
-  return s.replace(/ـ/g, '').trim()
+function asDate(v: unknown): Date | null {
+  if (v instanceof Date) return snapToDay(v)
+  if (isNum(v)) {
+    // Excel serial date fallback (only hit if the workbook wasn't read with cellDates).
+    const parsed = XLSX.SSF.parse_date_code(v)
+    if (parsed) return new Date(parsed.y, parsed.m - 1, parsed.d)
+  }
+  return null
 }
 
 function sheetRows(ws: XLSX.WorkSheet): unknown[][] {
   return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true })
 }
 
-// One month-name column ('الشهر') followed by N category value columns, ending with a
-// derivable 'الاجمالي' column we don't need to store. Used for the "مصروفات" sheet.
-function parseExpensesSheet(ws: XLSX.WorkSheet, errors: string[]): ParsedMetric[] {
+function stripTatweel(s: string): string {
+  return s.replace(/ـ/g, '').trim()
+}
+
+// كود الحساب | اسم الحساب | نوع الحساب | الحساب الرئيسي | المستوى | الحالة
+function parseAccounts(ws: XLSX.WorkSheet, errors: string[]): ParsedAccount[] {
   const rows = sheetRows(ws)
-  const headerIdx = rows.findIndex(r => String(r?.[0] ?? '').trim() === 'الشهر')
+  const headerIdx = rows.findIndex(r => String(r?.[0] ?? '').trim() === 'كود الحساب')
   if (headerIdx === -1) {
-    errors.push('تعذر إيجاد صف رؤوس الأعمدة (الشهر) في شيت "مصروفات"')
+    errors.push('تعذر إيجاد صف رؤوس الأعمدة (كود الحساب) في شيت "دليل الحسابات"')
     return []
   }
-  const header = rows[headerIdx] as unknown[]
-  const categories = header
-    .slice(1)
-    .map(c => String(c ?? '').trim())
-    .filter(c => c && c !== 'الاجمالي')
 
-  const metrics: ParsedMetric[] = []
+  const accounts: ParsedAccount[] = []
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i] as unknown[]
-    if (!row) continue
-    const mi = monthIndex(row[0])
-    if (mi === -1) continue // totals row, blank row, #REF! row, etc.
-    for (let c = 0; c < categories.length; c++) {
-      const val = row[c + 1]
-      if (isNum(val)) metrics.push({ sheet: 'مصروفات', category: categories[c], month: mi + 1, amount: val })
+    const code = row?.[0]
+    if (!isNum(code)) continue
+
+    const type = String(row?.[2] ?? '').trim() as AccountType
+    if (!ACCOUNT_TYPES.includes(type)) {
+      errors.push(`الحساب ${code} له نوع غير معروف: "${row?.[2]}" — تم تجاهله`)
+      continue
     }
+
+    const parentRaw = row?.[3]
+    const parentCode = isNum(parentRaw) ? parentRaw : null
+
+    accounts.push({
+      code,
+      name: String(row?.[1] ?? '').trim(),
+      type,
+      parentCode,
+      level: isNum(row?.[4]) ? row[4] : 1,
+    })
   }
-  return metrics
+  return accounts
 }
 
-// Repeating label/value column-pairs across one header row (مشتريات | | | الطباعة | | | ...).
-// A cell only becomes a metric when its own column's "month" cell matches a known month name,
-// which naturally skips the trailing 'الاجمالي' / notes rows without needing to locate them.
-function parseSheet2(ws: XLSX.WorkSheet, errors: string[]): ParsedMetric[] {
+// رقم القيد | تاريخ القيد | تاريخ الترحيل | رقم المرجع | نوع المستند | البيان | كود الحساب |
+// اسم الحساب | مركز التكلفة | مدين | دائن | حالة الاعتماد
+function parseJournal(ws: XLSX.WorkSheet, accountsByCode: Map<number, ParsedAccount>, errors: string[]): ParsedJournalLine[] {
   const rows = sheetRows(ws)
-  if (rows.length === 0) {
-    errors.push('شيت "ورقة2" فارغ')
+  const headerIdx = rows.findIndex(r => String(r?.[0] ?? '').trim() === 'رقم القيد')
+  if (headerIdx === -1) {
+    errors.push('تعذر إيجاد صف رؤوس الأعمدة (رقم القيد) في شيت "قيود اليومية"')
     return []
   }
-  const header = rows[0] as unknown[]
-  const categoryCols: { idx: number; category: string }[] = []
-  header.forEach((c, idx) => {
-    const label = String(c ?? '').trim()
-    if (label) categoryCols.push({ idx, category: label })
-  })
 
-  const metrics: ParsedMetric[] = []
-  for (let i = 1; i < rows.length; i++) {
+  const entries: ParsedJournalLine[] = []
+  for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i] as unknown[]
-    if (!row) continue
-    for (const { idx, category } of categoryCols) {
-      const mi = monthIndex(row[idx])
-      if (mi === -1) continue
-      const val = row[idx + 1]
-      if (isNum(val)) metrics.push({ sheet: 'ورقة2', category, month: mi + 1, amount: val })
+    const entryNumber = row?.[0]
+    if (!isNum(entryNumber)) continue
+
+    const accountCode = row?.[6]
+    if (!isNum(accountCode)) {
+      errors.push(`القيد رقم ${entryNumber}: كود حساب غير صالح — تم تجاهل السطر`)
+      continue
+    }
+
+    const account = accountsByCode.get(accountCode)
+    if (!account) {
+      errors.push(`القيد رقم ${entryNumber}: الحساب ${accountCode} غير موجود في دليل الحسابات — تم تجاهل السطر`)
+      continue
+    }
+
+    const entryDate = asDate(row?.[1])
+    const postingDate = asDate(row?.[2]) ?? entryDate
+    if (!entryDate) {
+      errors.push(`القيد رقم ${entryNumber}: تاريخ القيد غير صالح — تم تجاهل السطر`)
+      continue
+    }
+
+    entries.push({
+      entryNumber,
+      entryDate,
+      postingDate: postingDate ?? entryDate,
+      refNumber: String(row?.[3] ?? '').trim(),
+      docType: String(row?.[4] ?? '').trim(),
+      description: String(row?.[5] ?? '').trim(),
+      accountCode,
+      accountName: account.name,
+      accountType: account.type,
+      costCenter: String(row?.[8] ?? '').trim(),
+      debit: isNum(row?.[9]) ? row[9] : 0,
+      credit: isNum(row?.[10]) ? row[10] : 0,
+      approvalStatus: String(row?.[11] ?? '').trim(),
+    })
+  }
+
+  // Every individual entry (all lines sharing one رقم القيد) must debit = credit on its own —
+  // this is what makes the balance sheet tie out later without any reconciling/invented figure.
+  // Reported as a warning (using only literal summed values), never silently corrected.
+  const byEntry = new Map<number, { debit: number; credit: number }>()
+  for (const e of entries) {
+    const cur = byEntry.get(e.entryNumber) ?? { debit: 0, credit: 0 }
+    cur.debit += e.debit
+    cur.credit += e.credit
+    byEntry.set(e.entryNumber, cur)
+  }
+  for (const [entryNumber, { debit, credit }] of byEntry) {
+    if (Math.abs(debit - credit) > 0.01) {
+      errors.push(`القيد رقم ${entryNumber} غير متوازن: مدين ${debit.toLocaleString('ar-EG')} ≠ دائن ${credit.toLocaleString('ar-EG')}`)
     }
   }
-  return metrics
+
+  return entries
 }
 
-// Two-row merged header with a fixed column layout (verified against the source workbook).
-// Detecting data rows by "col 0 is a known month name" makes this robust to blank leading
-// rows and the trailing yearly-total rows below the month grid.
-const INCOME_COLUMNS: { idx: number; category: string }[] = [
-  { idx: 1, category: 'عدد القطع' },
-  { idx: 2, category: 'متوسط تكلفة القطعة' },
-  { idx: 3, category: 'مبيعات عامة' },
-  { idx: 4, category: 'تكلفة المبيعات المباعة' },
-  { idx: 5, category: 'مبيعات المحل' },
-  { idx: 6, category: 'اجمالى المصروفات' },
-  { idx: 7, category: 'صافى ربح الشهر' },
-  { idx: 8, category: 'نسبة تكلفة المبيعات العامة' },
-  { idx: 11, category: 'اجمالى التحصيلات يوزين' },
-  { idx: 12, category: 'التحصيلات الفعلية' },
-  { idx: 13, category: 'الفرق' },
-]
-
-function parseIncomeSheet(ws: XLSX.WorkSheet, errors: string[]): ParsedMetric[] {
-  const rows = sheetRows(ws)
-  const headerIdx = rows.findIndex(r => String(r?.[0] ?? '').trim() === 'الشهر')
-  if (headerIdx === -1) {
-    errors.push('تعذر إيجاد صف رؤوس الأعمدة (الشهر) في شيت "دخل"')
-  }
-  const sub = headerIdx !== -1 ? (rows[headerIdx + 1] as unknown[]) : []
-  if (String(sub?.[3] ?? '').trim() !== 'اجمالى التحصيلات' || String(rows[headerIdx]?.[7] ?? '').trim() !== 'صافى ربح الشهر') {
-    errors.push('تحذير: تخطيط أعمدة شيت "دخل" يبدو مختلفاً عن المتوقع — تحقق من الأرقام بعد الاستيراد')
-  }
-
-  const metrics: ParsedMetric[] = []
-  for (const row of rows) {
-    if (!row) continue
-    const mi = monthIndex(row[0])
-    if (mi === -1) continue
-    for (const { idx, category } of INCOME_COLUMNS) {
-      const val = row[idx]
-      if (isNum(val)) metrics.push({ sheet: 'دخل', category, month: mi + 1, amount: val })
-    }
-  }
-  return metrics
+export interface OpeningBalanceResult {
+  extraAccounts: ParsedAccount[]
+  openingLines: ParsedJournalLine[]
+  errors: string[]
 }
 
-// البيان (label) | كود الحساب (code) | المبلغ (amount) — column 2 is always the amount;
-// rows with no amount are section headers/subsection markers, used only to track which
-// section (assets/liabilities/equity) subsequent amount rows belong to.
-function parseBalanceSheet(ws: XLSX.WorkSheet, errors: string[]): { lines: ParsedBalanceLine[]; asOfDate: Date | null } {
+// البيان (label) | كود الحساب (code) | المبلغ (amount) — column 2 is always the amount. Only
+// rows carrying BOTH a code and an amount are leaf account balances; section headers, account-
+// group headers (e.g. "الاصول المتداولة" — has a code but no amount, it's the group itself, not
+// a balance), and subtotal/total rows (have an amount but no code) are skipped automatically by
+// that same rule, without needing to separately detect which kind of row each one is.
+function parseOpeningBalance(
+  ws: XLSX.WorkSheet,
+  accountsByCode: Map<number, ParsedAccount>,
+  errors: string[]
+): { extraAccounts: ParsedAccount[]; lines: { accountCode: number; amount: number }[]; asOfDate: Date | null } {
   const rows = sheetRows(ws)
 
   let asOfDate: Date | null = null
@@ -160,81 +180,147 @@ function parseBalanceSheet(ws: XLSX.WorkSheet, errors: string[]): { lines: Parse
     }
   }
   if (!asOfDate) {
-    errors.push('تعذر إيجاد تاريخ "قائمة المركز المالى" في عنوان الشيت — تم استخدام تاريخ اليوم')
-    asOfDate = new Date()
+    errors.push('تعذر إيجاد تاريخ "قائمة المركز المالى" في عنوان شيت الرصيد الافتتاحي — تم تجاهل الملف')
+    return { extraAccounts: [], lines: [], asOfDate: null }
   }
 
-  const lines: ParsedBalanceLine[] = []
-  let section: BalanceSheetSection = 'assets'
+  const extraAccounts: ParsedAccount[] = []
+  const lines: { accountCode: number; amount: number }[] = []
+  // The account TYPE for any code not already in دليل الحسابات is only knowable from which
+  // section heading it physically falls under in this sheet — tracked the same way the old
+  // monthly-summary balance-sheet parser tracked assets/liabilities/equity sections.
+  let section: AccountType | null = null
+
   for (const row of rows) {
     const rawLabel = String(row?.[0] ?? '').trim()
     if (!rawLabel) continue
     const label = stripTatweel(rawLabel)
-    const isTotal = /مجموع|محموع|اجمالى|اجمالي/.test(label)
 
-    // Total/subtotal rows (e.g. the final "إجمالي الالتزامات وحقوق الملكية" combined row,
-    // which contains both keywords) summarize the current section rather than starting a
-    // new one, so they must not redirect the section tracker.
-    if (!isTotal) {
-      if (label.includes('حقوق الملكية')) section = 'equity'
-      else if (label.includes('الالتزامات')) section = 'liabilities'
-      else if (label === 'الاصول') section = 'assets'
+    if (label.includes('حقوق الملكية')) { section = 'حقوق ملكية'; continue }
+    if (label.includes('الالتزامات')) { section = 'خصوم'; continue }
+    if (label === 'الاصول') { section = 'أصول'; continue }
+
+    const code = row?.[1]
+    const amount = row?.[2]
+    if (!isNum(code) || !isNum(amount)) continue
+
+    let account = accountsByCode.get(code)
+    if (!account) {
+      if (!section) {
+        errors.push(`تعذر تصنيف الحساب "${rawLabel}" (كود ${code}) في الرصيد الافتتاحي — لا يوجد قسم معروف له، تم تجاهله`)
+        continue
+      }
+      const root = Array.from(accountsByCode.values()).find(a => a.level === 1 && a.type === section)
+      account = { code, name: rawLabel, type: section, parentCode: root ? root.code : null, level: 2 }
+      accountsByCode.set(code, account)
+      extraAccounts.push(account)
+      errors.push(`الحساب "${rawLabel}" (كود ${code}) غير موجود في دليل الحسابات — تمت إضافته تلقائياً كحساب ${section} برصيد افتتاحي ${amount.toLocaleString('ar-EG')}`)
     }
 
-    const amount = row?.[2]
-    if (!isNum(amount)) continue // section header / not-yet-filled line — no amount to record
-
-    const rawCode = row?.[1]
-    const code = rawCode !== null && rawCode !== undefined && rawCode !== '' ? String(rawCode) : null
-
-    lines.push({ label: rawLabel, code, section, isTotal, amount })
+    lines.push({ accountCode: code, amount })
   }
-  return { lines, asOfDate }
+
+  return { extraAccounts, lines, asOfDate }
+}
+
+// Turns a "قائمة المركز المالى" workbook into: (a) any account codes it uses that aren't in the
+// main دليل الحسابات yet, and (b) one opening journal entry (entry #0) dated the day before the
+// stated as-of date, so it sits chronologically before every real transaction and its balances
+// simply accumulate into whatever those transactions add on top — no merging/reconciliation logic,
+// just another (earlier) entry in the same ledger.
+export function parseOpeningBalanceFile(file: File, existingAccounts: ParsedAccount[]): Promise<OpeningBalanceResult> {
+  return new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onerror = () => {
+      resolve({ extraAccounts: [], openingLines: [], errors: ['فشل في قراءة ملف الرصيد الافتتاحي'] })
+    }
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result
+        const wb = XLSX.read(data, { type: 'array', cellDates: true })
+        const errors: string[] = []
+        const accountsByCode = new Map(existingAccounts.map(a => [a.code, a]))
+
+        const bsWs = wb.Sheets['قائمة المركز المالى']
+        if (!bsWs) {
+          errors.push('لم يتم العثور على شيت "قائمة المركز المالى" في ملف الرصيد الافتتاحي')
+          resolve({ extraAccounts: [], openingLines: [], errors })
+          return
+        }
+
+        const { extraAccounts, lines, asOfDate } = parseOpeningBalance(bsWs, accountsByCode, errors)
+        if (!asOfDate || lines.length === 0) {
+          resolve({ extraAccounts, openingLines: [], errors })
+          return
+        }
+
+        const openingDate = new Date(asOfDate.getFullYear(), asOfDate.getMonth(), asOfDate.getDate() - 1)
+
+        const openingLines: ParsedJournalLine[] = lines.map(({ accountCode, amount }) => {
+          const account = accountsByCode.get(accountCode)!
+          const isDebitNormal = account.type === 'أصول' || account.type === 'مصروفات'
+          const debit = isDebitNormal ? Math.max(amount, 0) : Math.max(-amount, 0)
+          const credit = isDebitNormal ? Math.max(-amount, 0) : Math.max(amount, 0)
+          return {
+            entryNumber: 0,
+            entryDate: openingDate,
+            postingDate: openingDate,
+            refNumber: 'OB',
+            docType: 'رصيد افتتاحي',
+            description: 'رصيد افتتاحي',
+            accountCode,
+            accountName: account.name,
+            accountType: account.type,
+            costCenter: '',
+            debit, credit,
+            approvalStatus: '',
+          }
+        })
+
+        const totalDebit = openingLines.reduce((s, l) => s + l.debit, 0)
+        const totalCredit = openingLines.reduce((s, l) => s + l.credit, 0)
+        if (Math.abs(totalDebit - totalCredit) > 0.01) {
+          errors.push(`الرصيد الافتتاحي غير متوازن: مدين ${totalDebit.toLocaleString('ar-EG')} ≠ دائن ${totalCredit.toLocaleString('ar-EG')} (الملف الأصلي نفسه غير متوازن بهذا الفارق) — تم استيراده كما هو دون أي تعديل`)
+        }
+
+        resolve({ extraAccounts, openingLines, errors })
+      } catch (err) {
+        resolve({ extraAccounts: [], openingLines: [], errors: [String(err)] })
+      }
+    }
+    reader.readAsArrayBuffer(file)
+  })
 }
 
 export function parseExcelFile(file: File): Promise<ParseResult> {
   return new Promise((resolve) => {
     const reader = new FileReader()
     reader.onerror = () => {
-      resolve({ metrics: [], balanceSheet: [], asOfDate: null, errors: ['فشل في قراءة الملف. تأكد من أن الملف غير تالف وحاول مرة أخرى'] })
+      resolve({ accounts: [], entries: [], errors: ['فشل في قراءة الملف. تأكد من أن الملف غير تالف وحاول مرة أخرى'] })
     }
     reader.onload = (e) => {
       try {
         const data = e.target?.result
-        const wb = XLSX.read(data, { type: 'array' })
+        const wb = XLSX.read(data, { type: 'array', cellDates: true })
         const errors: string[] = []
-        const metrics: ParsedMetric[] = []
-        let balanceSheet: ParsedBalanceLine[] = []
-        let asOfDate: Date | null = null
 
-        const expensesWs = wb.Sheets['مصروفات']
-        if (expensesWs) metrics.push(...parseExpensesSheet(expensesWs, errors))
-        else errors.push('لم يتم العثور على شيت "مصروفات" في الملف')
+        const accountsWs = wb.Sheets['دليل الحسابات']
+        const accounts = accountsWs ? parseAccounts(accountsWs, errors) : []
+        if (!accountsWs) errors.push('لم يتم العثور على شيت "دليل الحسابات" في الملف')
 
-        const sheet2Ws = wb.Sheets['ورقة2']
-        if (sheet2Ws) metrics.push(...parseSheet2(sheet2Ws, errors))
-        else errors.push('لم يتم العثور على شيت "ورقة2" في الملف')
+        const accountsByCode = new Map(accounts.map(a => [a.code, a]))
 
-        const incomeWs = wb.Sheets['دخل']
-        if (incomeWs) metrics.push(...parseIncomeSheet(incomeWs, errors))
-        else errors.push('لم يتم العثور على شيت "دخل" في الملف')
+        const journalWs = wb.Sheets['قيود اليومية']
+        const entries = journalWs ? parseJournal(journalWs, accountsByCode, errors) : []
+        if (!journalWs) errors.push('لم يتم العثور على شيت "قيود اليومية" في الملف')
 
-        const bsWs = wb.Sheets['قائمة المركز المالى']
-        if (bsWs) {
-          const r = parseBalanceSheet(bsWs, errors)
-          balanceSheet = r.lines
-          asOfDate = r.asOfDate
-        } else {
-          errors.push('لم يتم العثور على شيت "قائمة المركز المالى" في الملف')
-        }
-
-        if (metrics.length === 0 && balanceSheet.length === 0) {
+        if (accounts.length === 0 && entries.length === 0) {
           errors.push('لم يتم العثور على بيانات صالحة في الملف')
         }
 
-        resolve({ metrics, balanceSheet, asOfDate, errors })
+        resolve({ accounts, entries, errors })
       } catch (err) {
-        resolve({ metrics: [], balanceSheet: [], asOfDate: null, errors: [String(err)] })
+        resolve({ accounts: [], entries: [], errors: [String(err)] })
       }
     }
     reader.readAsArrayBuffer(file)

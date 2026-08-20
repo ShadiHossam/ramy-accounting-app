@@ -58,6 +58,45 @@ const SYSTEM_PROMPT = `أنت مستشار مالي خبير ومحلل أعما
 قيم status يكون إما: "good" أو "warning" أو "danger" فقط.
 أجب بالعربية فقط.`
 
+interface RawKpi {
+  name?: unknown
+  value?: unknown
+  status?: unknown
+  comment?: unknown
+}
+
+// The model is instructed to reply with a specific JSON shape, but free models sometimes
+// omit fields or return the wrong types — this guarantees the arrays/fields the UI reads
+// directly (insights.problems.length, .map, etc.) always exist with the right type, so a
+// malformed reply can't crash the dashboard or insights page with a TypeError.
+function normalizeInsights(raw: Record<string, unknown>) {
+  const stringArray = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+  const kpis = Array.isArray(raw.kpis)
+    ? (raw.kpis as RawKpi[])
+      .filter((k): k is RawKpi => !!k && typeof k === 'object')
+      .map(k => ({
+        name: typeof k.name === 'string' ? k.name : '',
+        value: typeof k.value === 'string' ? k.value : String(k.value ?? ''),
+        status: k.status === 'good' || k.status === 'warning' || k.status === 'danger' ? k.status : 'warning',
+        comment: typeof k.comment === 'string' ? k.comment : '',
+      }))
+    : []
+
+  return {
+    period: typeof raw.period === 'string' ? raw.period : undefined,
+    summary: typeof raw.summary === 'string' ? raw.summary : undefined,
+    alerts: stringArray(raw.alerts),
+    kpis,
+    problems: stringArray(raw.problems),
+    suggestions: stringArray(raw.suggestions),
+    opportunities: stringArray(raw.opportunities),
+  }
+}
+
+// Per-model timeout — with up to 9 models tried sequentially, a single hung provider
+// could otherwise stall the request for minutes.
+const MODEL_TIMEOUT_MS = 20_000
+
 function callModel(provider: string, model: string, context: string, apiKey: string) {
   const url = provider === 'groq' ? GROQ_URL : OPENROUTER_URL
   return fetch(url, {
@@ -74,6 +113,7 @@ function callModel(provider: string, model: string, context: string, apiKey: str
         { role: 'user', content: `حلل هذه البيانات المالية وأعطني التقرير الكامل:\n${context}` },
       ],
     }),
+    signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
   })
 }
 
@@ -93,7 +133,16 @@ export async function POST(req: NextRequest) {
       const apiKey = provider === 'groq' ? groqKey : openrouterKey
       if (!apiKey) continue
 
-      const res = await callModel(provider, model, context, apiKey)
+      let res: Response
+      try {
+        res = await callModel(provider, model, context, apiKey)
+      } catch (err) {
+        // Timeout (AbortSignal.timeout) or network error — move on to the next model
+        // instead of letting it propagate and abort the whole request.
+        console.error(`${provider} fetch failed (${model}):`, err instanceof Error ? err.message : err)
+        lastStatus = 504
+        continue
+      }
 
       if (res.ok) {
         const data = await res.json()
@@ -104,7 +153,7 @@ export async function POST(req: NextRequest) {
           continue
         }
         try {
-          const insights = JSON.parse(jsonMatch[0])
+          const insights = normalizeInsights(JSON.parse(jsonMatch[0]))
           return NextResponse.json({ insights })
         } catch {
           console.error(`JSON parse error (${provider}/${model}):`, jsonMatch[0].slice(0, 200))
@@ -115,8 +164,6 @@ export async function POST(req: NextRequest) {
       lastStatus = res.status
       const lastBody = await res.text()
       console.error(`${provider} error (${model}):`, lastStatus, lastBody)
-
-      if (lastStatus === 401) continue
     }
 
     let msg = 'تعذر الاتصال بالذكاء الاصطناعي. حاول مرة أخرى لاحقاً.'

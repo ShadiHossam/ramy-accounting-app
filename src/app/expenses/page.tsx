@@ -9,8 +9,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 const COLORS = ['#ef4444', '#f97316', '#f59e0b', '#8b5cf6', '#6366f1', '#06b6d4', '#ec4899', '#10b981', '#14b8a6', '#84cc16']
 
 export default function ExpensesPage() {
-  const { metrics, period } = useFinancialStore()
-  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
+  const { entries, period } = useFinancialStore()
+  const filtered = useMemo(() => filterByPeriod(entries, period), [entries, period])
   const byCat = useMemo(() => calcExpensesByCategory(filtered), [filtered])
   const byItem = useMemo(() => calcExpensesByAnalytical(filtered), [filtered])
 

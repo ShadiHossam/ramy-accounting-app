@@ -14,7 +14,7 @@ const SUGGESTIONS = [
   'إيه أكتر شهر ربحت فيه؟',
   'إيه أعلى مصدر دخل؟',
   'قارنلي المصروفات بالإيرادات',
-  'إيه نسبة الربح الإجمالي؟',
+  'إيه هامش صافي الربح؟',
   'أنهي بنود الصرف الأعلى؟',
 ]
 
@@ -24,7 +24,7 @@ export default function AIChatButton() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const { metrics, period } = useFinancialStore()
+  const { entries, period } = useFinancialStore()
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -41,7 +41,7 @@ export default function AIChatButton() {
     setLoading(true)
 
     try {
-      const context = buildFinancialContext(metrics, period)
+      const context = buildFinancialContext(entries, period)
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

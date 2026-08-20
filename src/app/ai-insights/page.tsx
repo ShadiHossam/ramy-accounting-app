@@ -52,7 +52,7 @@ function KpiCard({ kpi }: { kpi: KPI }) {
 }
 
 export default function AIInsightsPage() {
-  const { metrics } = useFinancialStore()
+  const { entries } = useFinancialStore()
   const [insights, setInsights] = useState<Insights | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -62,20 +62,20 @@ export default function AIInsightsPage() {
   const [selYear, setSelYear] = useState<number>(new Date().getFullYear())
   const [selMonth, setSelMonth] = useState<number>(new Date().getMonth())
 
-  const availableYears = useMemo(() => getAvailableYears(metrics), [metrics])
+  const availableYears = useMemo(() => getAvailableYears(entries), [entries])
 
   const localPeriod: PeriodFilter = useMemo(() => {
     if (periodMode === 'year') return yearPeriod(selYear)
     if (periodMode === 'month') return monthPeriod(selYear, selMonth)
-    return allTimePeriod(metrics)
-  }, [periodMode, selYear, selMonth, metrics])
+    return allTimePeriod(entries)
+  }, [periodMode, selYear, selMonth, entries])
 
   const generate = async () => {
     if (loading) return
     setLoading(true)
     setError(null)
     try {
-      const context = buildFinancialContext(metrics, localPeriod)
+      const context = buildFinancialContext(entries, localPeriod)
       const res = await fetch('/api/insights', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -92,7 +92,7 @@ export default function AIInsightsPage() {
     }
   }
 
-  const noData = metrics.length === 0
+  const noData = entries.length === 0
 
   return (
     <AppShell title="تقرير الذكاء الاصطناعي">

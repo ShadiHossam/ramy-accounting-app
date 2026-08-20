@@ -1,12 +1,31 @@
-export type SheetName = 'مصروفات' | 'ورقة2' | 'دخل'
+export type AccountType = 'أصول' | 'خصوم' | 'حقوق ملكية' | 'إيرادات' | 'مصروفات'
 
-export interface MonthlyMetric {
+// دليل الحسابات (chart of accounts) — the source of truth for what each account code means.
+export interface Account {
+  code: number
+  name: string
+  type: AccountType
+  parentCode: number | null
+  level: number
+}
+
+// One row of قيود اليومية (the journal). This is the raw ledger — every figure shown anywhere
+// in the app must trace back to a sum/filter over these rows, never an invented bucket.
+export interface JournalLine {
   id: string
-  sheet: SheetName
-  category: string
-  year: number
-  month: number // 1-12
-  amount: number
+  entryNumber: number
+  entryDate: Date
+  postingDate: Date
+  refNumber: string
+  docType: string
+  description: string
+  accountCode: number
+  accountName: string
+  accountType: AccountType
+  costCenter: string
+  debit: number
+  credit: number
+  approvalStatus: string
 }
 
 export type BalanceSheetSection = 'assets' | 'liabilities' | 'equity'
@@ -21,34 +40,22 @@ export interface BalanceSheetLine {
   asOfDate: Date
 }
 
+// Only the standard, non-discretionary formula: Net Profit = Revenue - Expenses.
+// No gross-profit/selling/admin/operating split — that would require deciding which expense
+// account belongs to which bucket, a judgment call the source data doesn't make.
 export interface FinancialSummary {
   totalRevenue: number
-  salesReturns: number
-  netSales: number
-  purchases: number
-  grossProfit: number
-  grossMargin: number
-  sellingExpenses: number
-  adminExpenses: number
-  operatingExpenses: number
-  otherExpenses: number
   totalExpenses: number
-  taxExpenses: number
   netProfit: number
-  netMargin: number
+  netMargin: number // % — netProfit / totalRevenue
 }
 
 export interface MonthlyData {
   month: string // 'YYYY-MM'
-  label: string // 'يناير 2024'
+  label: string // 'يناير 2026'
   revenue: number
   expenses: number
-  purchases: number
-  salesReturns: number
   netProfit: number
-  grossProfit: number
-  grossMargin: number // %
-  netMargin: number   // %
 }
 
 export interface CategoryBreakdown {

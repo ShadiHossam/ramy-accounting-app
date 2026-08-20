@@ -29,17 +29,17 @@ export function thisYearPeriod(): PeriodFilter {
   return { type: 'year', startDate: start, endDate: end, label: `سنة ${now.getFullYear()}` }
 }
 
-export function allTimePeriod(metrics: { year: number; month: number }[]): PeriodFilter {
-  if (metrics.length === 0) {
+export function allTimePeriod(entries: { entryDate: Date }[]): PeriodFilter {
+  if (entries.length === 0) {
     return { type: 'custom', startDate: new Date(2020, 0, 1), endDate: new Date(), label: 'كل الفترات' }
   }
-  const keys = metrics.map(m => m.year * 12 + (m.month - 1))
-  const minKey = Math.min(...keys)
-  const maxKey = Math.max(...keys)
+  const times = entries.map(e => e.entryDate.getTime())
+  const min = new Date(Math.min(...times))
+  const max = new Date(Math.max(...times))
   return {
     type: 'custom',
-    startDate: new Date(Math.floor(minKey / 12), minKey % 12, 1),
-    endDate: new Date(Math.floor(maxKey / 12), (maxKey % 12) + 1, 0, 23, 59, 59),
+    startDate: new Date(min.getFullYear(), min.getMonth(), 1),
+    endDate: new Date(max.getFullYear(), max.getMonth() + 1, 0, 23, 59, 59),
     label: 'كل الفترات'
   }
 }
@@ -67,8 +67,8 @@ export function monthPeriod(year: number, month: number): PeriodFilter {
   }
 }
 
-export function getAvailableYears(metrics: { year: number }[]): number[] {
-  const years = new Set(metrics.map(m => m.year))
+export function getAvailableYears(entries: { entryDate: Date }[]): number[] {
+  const years = new Set(entries.map(e => e.entryDate.getFullYear()))
   return Array.from(years).sort((a, b) => b - a)
 }
 

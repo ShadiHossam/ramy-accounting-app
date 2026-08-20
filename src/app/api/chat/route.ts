@@ -36,6 +36,7 @@ ${context}
           ...messages,
         ],
       }),
+      signal: AbortSignal.timeout(30_000),
     })
 
     if (!res.ok) {
@@ -51,7 +52,9 @@ ${context}
     const reply: string = data.choices?.[0]?.message?.content ?? ''
     return NextResponse.json({ reply })
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'خطأ غير معروف'
+    const msg = err instanceof Error && err.name === 'TimeoutError'
+      ? 'انتهت مهلة الاتصال بالذكاء الاصطناعي. حاول مرة أخرى.'
+      : err instanceof Error ? err.message : 'خطأ غير معروف'
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

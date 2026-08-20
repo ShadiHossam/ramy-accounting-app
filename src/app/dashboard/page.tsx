@@ -14,12 +14,12 @@ import type { SmartInsights } from '@/lib/types'
 
 export default function DashboardPage() {
   const router = useRouter()
-  const { metrics, period, insights, setInsights } = useFinancialStore()
+  const { entries, period, insights, setInsights } = useFinancialStore()
   const insightsLoading = useRef(false)
   const [insightsLoadingState, setInsightsLoadingState] = useState(false)
   const [insightsError, setInsightsError] = useState<string | null>(null)
 
-  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
+  const filtered = useMemo(() => filterByPeriod(entries, period), [entries, period])
   const summary = useMemo(() => calcSummary(filtered), [filtered])
   const monthly = useMemo(() => calcMonthlyData(filtered), [filtered])
   const revSources = useMemo(() => calcRevenueBySource(filtered), [filtered])
@@ -35,7 +35,7 @@ export default function DashboardPage() {
     setInsightsLoadingState(true)
     setInsightsError(null)
 
-    const context = buildFinancialContext(metrics, period)
+    const context = buildFinancialContext(entries, period)
     fetch('/api/insights', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -51,7 +51,7 @@ export default function DashboardPage() {
         insightsLoading.current = false
         setInsightsLoadingState(false)
       })
-  }, [filtered.length, period, setInsights, metrics])
+  }, [filtered.length, period, setInsights, entries])
 
   useEffect(() => {
     if (insights) return
@@ -66,11 +66,6 @@ export default function DashboardPage() {
         [],
         ['البند', 'القيمة'],
         ['إجمالي الإيرادات', summary.totalRevenue],
-        ['مردودات المبيعات', summary.salesReturns],
-        ['صافي المبيعات', summary.netSales],
-        ['تكلفة المشتريات', summary.purchases],
-        ['مجمل الربح', summary.grossProfit],
-        ['هامش الربح الإجمالي', `${summary.grossMargin.toFixed(1)}%`],
         ['إجمالي المصروفات', summary.totalExpenses],
         ['صافي الربح', summary.netProfit],
         ['هامش صافي الربح', `${summary.netMargin.toFixed(1)}%`],
@@ -85,7 +80,7 @@ export default function DashboardPage() {
     },
   ], [summary, monthly, period.label])
 
-  if (metrics.length === 0) {
+  if (entries.length === 0) {
     return (
       <AppShell title="لوحة التحكم">
         <div className="flex flex-col items-center justify-center h-96 text-gray-400">
@@ -112,8 +107,7 @@ export default function DashboardPage() {
           <SummaryCard title="إجمالي الإيرادات" value={summary.totalRevenue} icon={TrendingUp} color="green" />
           <SummaryCard title="إجمالي المصروفات" value={summary.totalExpenses} icon={TrendingDown} color="red" />
           <SummaryCard title="صافي الربح" value={summary.netProfit} icon={DollarSign} color={summary.netProfit >= 0 ? 'blue' : 'red'} />
-          <SummaryCard title="هامش صافي الربح" value={summary.netMargin} icon={Percent} color="purple" isPercent isCurrency={false}
-            subtitle={`هامش إجمالي: ${summary.grossMargin.toFixed(1)}%`} />
+          <SummaryCard title="هامش صافي الربح" value={summary.netMargin} icon={Percent} color="purple" isPercent isCurrency={false} />
         </div>
 
         {/* Smart Insights */}
@@ -140,10 +134,6 @@ export default function DashboardPage() {
           <div className="space-y-2">
             {[
               { label: 'إجمالي الإيرادات', value: summary.totalRevenue, indent: false, bold: false, color: 'text-emerald-600' },
-              { label: 'مردودات المبيعات', value: -summary.salesReturns, indent: true, bold: false, color: 'text-red-500' },
-              { label: 'صافي المبيعات', value: summary.netSales, indent: false, bold: true, color: 'text-gray-900' },
-              { label: 'تكلفة المشتريات', value: -summary.purchases, indent: true, bold: false, color: 'text-red-500' },
-              { label: 'مجمل الربح', value: summary.grossProfit, indent: false, bold: true, color: summary.grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600' },
               { label: 'إجمالي المصروفات', value: -summary.totalExpenses, indent: true, bold: false, color: 'text-red-500' },
               { label: 'صافي الربح', value: summary.netProfit, indent: false, bold: true, color: summary.netProfit >= 0 ? 'text-emerald-700' : 'text-red-700' },
             ].map((row, i) => (
@@ -173,7 +163,7 @@ export default function DashboardPage() {
                   <tr key={m.month} className="border-b border-gray-50 hover:bg-gray-50">
                     <td className="py-2 text-gray-700 font-medium">{m.label}</td>
                     <td className="py-2 text-emerald-600">{m.revenue.toLocaleString('ar-EG')} ج.م</td>
-                    <td className="py-2 text-red-500">{(m.expenses + m.purchases).toLocaleString('ar-EG')} ج.م</td>
+                    <td className="py-2 text-red-500">{m.expenses.toLocaleString('ar-EG')} ج.م</td>
                     <td className={`py-2 text-left font-medium ${m.netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{m.netProfit.toLocaleString('ar-EG')} ج.م</td>
                   </tr>
                 ))}

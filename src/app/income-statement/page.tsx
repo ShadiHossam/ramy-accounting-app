@@ -1,39 +1,26 @@
 'use client'
-import { useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 import AppShell from '@/components/layout/AppShell'
 import { useFinancialStore } from '@/store/financial-store'
-import { calcSummary, calcMonthlyData, filterByPeriod, formatCurrency } from '@/lib/financial-engine'
+import { calcSummary, calcMonthlyData, calcRevenueBySource, calcExpensesByCategory, filterByPeriod, formatCurrency } from '@/lib/financial-engine'
 import { Printer, TrendingUp, TrendingDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import WaterfallChart from '@/components/charts/WaterfallChart'
 import ExportButton from '@/components/ui/ExportButton'
 
 export default function IncomeStatementPage() {
-  const { metrics, period } = useFinancialStore()
-  const printRef = useRef<HTMLDivElement>(null)
-  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
+  const { entries, period } = useFinancialStore()
+  const filtered = useMemo(() => filterByPeriod(entries, period), [entries, period])
   const s = useMemo(() => calcSummary(filtered), [filtered])
   const monthly = useMemo(() => calcMonthlyData(filtered), [filtered])
+  const revSources = useMemo(() => calcRevenueBySource(filtered), [filtered])
+  const expCats = useMemo(() => calcExpensesByCategory(filtered), [filtered])
 
-  const rows = useMemo(() => [
-    { label: 'إجمالي الإيرادات', value: s.totalRevenue, level: 0, isTotal: false, color: 'text-emerald-600' },
-    { label: 'مردودات المبيعات', value: s.salesReturns, level: 1, isTotal: false, color: 'text-red-500', deduct: true },
-    { label: 'صافي المبيعات', value: s.netSales, level: 0, isTotal: true, color: 'text-gray-900' },
-    { label: 'تكلفة المشتريات', value: s.purchases, level: 1, isTotal: false, color: 'text-red-500', deduct: true },
-    { label: 'مجمل الربح', value: s.grossProfit, level: 0, isTotal: true, color: s.grossProfit >= 0 ? 'text-emerald-700' : 'text-red-700', highlight: true },
-    { label: 'هامش الربح الإجمالي', value: s.grossMargin, level: 1, isTotal: false, color: 'text-gray-500', isPercent: true },
-    { label: 'مصروفات بيعية وتسويقية', value: s.sellingExpenses, level: 1, isTotal: false, color: 'text-red-500', deduct: true },
-    { label: 'مصروفات عمومية وإدارية', value: s.adminExpenses, level: 1, isTotal: false, color: 'text-red-500', deduct: true },
-    { label: 'مصروفات التشغيل', value: s.operatingExpenses, level: 1, isTotal: false, color: 'text-red-500', deduct: true },
-    ...(s.otherExpenses > 0 ? [{ label: 'مصروفات أخرى (غير مصنّفة)', value: s.otherExpenses, level: 1, isTotal: false, color: 'text-red-500', deduct: true }] : []),
-    // Excludes tax (matches the itemized rows above it) so مجمل الربح − هذا السطر = صافي الربح قبل الضريبة exactly.
-    // s.totalExpenses (which includes tax) is used for the headline KPI elsewhere, not here.
-    { label: 'إجمالي المصروفات التشغيلية', value: s.totalExpenses - s.taxExpenses, level: 0, isTotal: true, color: 'text-red-600' },
-    { label: 'صافي الربح قبل الضريبة', value: s.netProfit + s.taxExpenses, level: 0, isTotal: true, color: 'text-gray-900' },
-    { label: 'ضرائب (مصلحة الضرائب)', value: s.taxExpenses, level: 1, isTotal: false, color: 'text-red-500', deduct: true },
-    { label: 'صافي الربح', value: s.netProfit, level: 0, isTotal: true, color: s.netProfit >= 0 ? 'text-emerald-700' : 'text-red-700', highlight: true, big: true },
-    { label: 'هامش صافي الربح', value: s.netMargin, level: 1, isTotal: false, color: 'text-gray-500', isPercent: true },
-  ], [s])
+  const waterfallSteps = useMemo(() => [
+    { label: 'الإيرادات', value: s.totalRevenue, type: 'start' as const },
+    ...expCats.map(e => ({ label: e.name, value: -e.amount, type: 'negative' as const })),
+    { label: 'صافي الربح', value: s.netProfit, type: 'total' as const },
+  ], [s, expCats])
 
   const incomeExcelSheets = useMemo(() => [
     {
@@ -41,8 +28,16 @@ export default function IncomeStatementPage() {
       data: [
         ['قائمة الدخل', period.label],
         [],
-        ['البند', 'القيمة'],
-        ...rows.map(r => [r.label, r.isPercent ? `${r.value.toFixed(1)}%` : r.value]),
+        ['الإيرادات حسب الحساب', ''],
+        ...revSources.map(r => [r.name, r.amount]),
+        ['إجمالي الإيرادات', s.totalRevenue],
+        [],
+        ['المصروفات حسب الحساب', ''],
+        ...expCats.map(e => [e.name, e.amount]),
+        ['إجمالي المصروفات', s.totalExpenses],
+        [],
+        ['صافي الربح', s.netProfit],
+        ['هامش صافي الربح', `${s.netMargin.toFixed(1)}%`],
       ] as (string | number | null)[][]
     },
     {
@@ -53,16 +48,16 @@ export default function IncomeStatementPage() {
         ['الإجمالي', s.totalRevenue, s.totalExpenses, s.netProfit],
       ] as (string | number | null)[][]
     },
-  ], [rows, monthly, s, period.label])
+  ], [revSources, expCats, monthly, s, period.label])
 
   return (
     <AppShell title="قائمة الدخل (أرباح وخسائر)">
       <div className="space-y-6">
-        <div ref={printRef} id="income-statement-export" className="bg-white rounded-xl border border-gray-100 p-6">
+        <div id="income-statement-export" className="bg-white rounded-xl border border-gray-100 p-6">
           <div className="flex items-center justify-between mb-6 print:hidden">
             <div>
               <h2 className="text-lg font-bold text-gray-900">قائمة الدخل</h2>
-              <p className="text-gray-400 text-sm">{period.label} · {filtered.length.toLocaleString('ar-EG')} سجل</p>
+              <p className="text-gray-400 text-sm">{period.label} · {filtered.length.toLocaleString('ar-EG')} سطر قيد</p>
             </div>
             <div className="flex items-center gap-2">
               <button onClick={() => window.print()} className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
@@ -72,24 +67,48 @@ export default function IncomeStatementPage() {
             </div>
           </div>
 
-          <div className="divide-y divide-gray-50">
-            {rows.map((row, i) => (
-              <div key={i} className={cn(
-                'flex justify-between items-center py-3',
-                row.level === 1 ? 'pr-6' : '',
-                row.highlight ? 'bg-gray-50 rounded-lg px-3 -mx-3' : '',
-                row.big ? 'py-4' : '',
-              )}>
-                <span className={cn('text-sm', row.isTotal ? 'font-bold' : 'text-gray-600', row.big ? 'text-base' : '')}>
-                  {row.label}
-                </span>
-                <span className={cn('font-medium', row.color, row.big ? 'text-lg font-bold' : 'text-sm')}>
-                  {row.isPercent ? `${row.value.toFixed(1)}%` : (
-                    <>{row.deduct && row.value > 0 ? '(' : ''}{formatCurrency(row.value)}{row.deduct && row.value > 0 ? ')' : ''}</>
-                  )}
-                </span>
+          {/* Revenue by account */}
+          <div className="mb-6">
+            <h3 className="text-sm font-bold text-gray-900 mb-2">الإيرادات</h3>
+            <div className="divide-y divide-gray-50">
+              {revSources.map((r, i) => (
+                <div key={i} className="flex justify-between items-center py-2 pr-2">
+                  <span className="text-sm text-gray-600">{r.name}</span>
+                  <span className="text-sm font-medium text-emerald-600">{formatCurrency(r.amount)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between items-center py-3 border-t border-gray-200 mt-1">
+                <span className="text-sm font-bold text-gray-900">إجمالي الإيرادات</span>
+                <span className="text-sm font-bold text-emerald-700">{formatCurrency(s.totalRevenue)}</span>
               </div>
-            ))}
+            </div>
+          </div>
+
+          {/* Expenses by account */}
+          <div className="mb-6">
+            <h3 className="text-sm font-bold text-gray-900 mb-2">المصروفات</h3>
+            <div className="divide-y divide-gray-50">
+              {expCats.map((e, i) => (
+                <div key={i} className="flex justify-between items-center py-2 pr-2">
+                  <span className="text-sm text-gray-600">{e.name}</span>
+                  <span className="text-sm font-medium text-red-500">({formatCurrency(e.amount)})</span>
+                </div>
+              ))}
+              <div className="flex justify-between items-center py-3 border-t border-gray-200 mt-1">
+                <span className="text-sm font-bold text-gray-900">إجمالي المصروفات</span>
+                <span className="text-sm font-bold text-red-600">({formatCurrency(s.totalExpenses)})</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Net profit */}
+          <div className={cn('flex justify-between items-center py-4 px-3 -mx-3 rounded-lg', s.netProfit >= 0 ? 'bg-emerald-50' : 'bg-red-50')}>
+            <span className="text-base font-bold text-gray-900">صافي الربح</span>
+            <span className={cn('text-lg font-bold', s.netProfit >= 0 ? 'text-emerald-700' : 'text-red-700')}>{formatCurrency(s.netProfit)}</span>
+          </div>
+          <div className="flex justify-between items-center py-2 pr-2">
+            <span className="text-sm text-gray-500">هامش صافي الربح</span>
+            <span className="text-sm text-gray-500">{s.netMargin.toFixed(1)}%</span>
           </div>
         </div>
 
@@ -97,20 +116,11 @@ export default function IncomeStatementPage() {
         {s.totalRevenue > 0 && (
           <div className="bg-white rounded-xl border border-gray-100 p-6">
             <h3 className="font-semibold text-gray-900 mb-4">مسار تكوين الربح (Waterfall)</h3>
-            <WaterfallChart
-              totalRevenue={s.totalRevenue}
-              salesReturns={s.salesReturns}
-              netSales={s.netSales}
-              purchases={s.purchases}
-              grossProfit={s.grossProfit}
-              totalExpenses={s.totalExpenses}
-              netProfit={s.netProfit}
-            />
+            <WaterfallChart steps={waterfallSteps} />
             <div className="flex gap-6 mt-3 justify-center text-xs text-gray-500">
               <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-indigo-500 inline-block" /> إيرادات</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-500 inline-block" /> إجمالي</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-500 inline-block" /> خصومات</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-sky-500 inline-block" /> صافي</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-500 inline-block" /> مصروفات</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-sky-500 inline-block" /> صافي الربح</span>
             </div>
           </div>
         )}

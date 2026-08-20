@@ -3,43 +3,38 @@ import { useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import AppShell from '@/components/layout/AppShell'
 import { useFinancialStore } from '@/store/financial-store'
-import { formatCurrency } from '@/lib/financial-engine'
+import { formatCurrency, calcBalanceSheet } from '@/lib/financial-engine'
 import { Printer, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BalanceSheetLine, BalanceSheetSection } from '@/lib/types'
 
-// Balance-sheet labels carry stylistic Arabic tatweel (ـ) elongation characters
-// (e.g. "الملكــــية") that must be stripped before keyword matching.
-const clean = (s: string) => s.replace(/ـ/g, '')
-
 export default function BalanceSheetPage() {
   const router = useRouter()
-  const { balanceSheet } = useFinancialStore()
+  const { entries, accounts } = useFinancialStore()
 
+  // The balance sheet is always "as of" the latest transaction date in the ledger — every
+  // account's running balance up to that date, computed live, never stored/pre-aggregated.
   const latestDate = useMemo(() => {
-    if (balanceSheet.length === 0) return null
-    return balanceSheet.reduce((max, l) => new Date(l.asOfDate) > new Date(max) ? l.asOfDate : max, balanceSheet[0].asOfDate)
-  }, [balanceSheet])
+    if (entries.length === 0) return null
+    return entries.reduce((max, e) => e.entryDate > max ? e.entryDate : max, entries[0].entryDate)
+  }, [entries])
 
   const lines = useMemo(() =>
-    latestDate ? balanceSheet.filter(l => new Date(l.asOfDate).getTime() === new Date(latestDate).getTime()) : [],
-    [balanceSheet, latestDate]
+    latestDate ? calcBalanceSheet(entries, accounts, latestDate) : [],
+    [entries, accounts, latestDate]
   )
 
   const bySection = (section: BalanceSheetSection) => lines.filter(l => l.section === section)
 
-  // "إجمالي الأصول" specifically — not the "إجمالي الأصول الثابتة/المتداولة" subtotals above it.
+  // calcBalanceSheet tags every root-level grand-total line with id "root-<code>" and every
+  // subtotal-group line with id "grp-<code>" — matching by that id prefix is exact and doesn't
+  // depend on which Arabic spelling of "إجمالي/اجمالي" a label happens to use.
   const totalAssetsLine = useMemo(() =>
-    bySection('assets').find(l => {
-      const c = clean(l.label)
-      return l.isTotal && /^(اجمالى|اجمالي)/.test(c) && !c.includes('الثابتة') && !c.includes('المتداولة')
-    }),
+    bySection('assets').find(l => l.id.startsWith('root-')),
     [lines]
   )
-  // The combined grand-total row (e.g. "إجمالي الالتزامات وحقوق الملكية") is the only line
-  // whose label mentions both الالتزامات and حقوق, regardless of which section it parsed into.
   const totalLiabEquityLine = useMemo(() =>
-    lines.find(l => clean(l.label).includes('الالتزامات') && clean(l.label).includes('حقوق')),
+    lines.find(l => l.id === 'combined-liab-equity'),
     [lines]
   )
 
@@ -51,7 +46,7 @@ export default function BalanceSheetPage() {
         <div className="flex flex-col items-center justify-center h-96 text-gray-400 bg-white rounded-xl border border-gray-100">
           <AlertCircle className="w-16 h-16 mb-4 opacity-50" />
           <p className="text-xl font-medium mb-2">لا توجد بيانات ميزانية</p>
-          <p className="text-sm mb-6">ارفع ملف Excel يحتوي على شيت &quot;قائمة المركز المالى&quot;</p>
+          <p className="text-sm mb-6">ارفع ملف Excel يحتوي على شيتَي &quot;دليل الحسابات&quot; و&quot;قيود اليومية&quot;</p>
           <button onClick={() => router.push('/upload')} className="bg-emerald-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-emerald-700">
             رفع ملف
           </button>

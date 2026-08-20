@@ -27,8 +27,8 @@ export async function exportToPdf(elementId: string, filename: string) {
   const contentWidth = pageWidth - margin * 2
   const imgHeight = (canvas.height * contentWidth) / canvas.width
 
-  let y = margin
   let remaining = imgHeight
+  let pageIndex = 0
 
   while (remaining > 0) {
     const sliceHeight = Math.min(remaining, pageHeight - margin * 2)
@@ -41,11 +41,11 @@ export async function exportToPdf(elementId: string, filename: string) {
     const ctx = sliceCanvas.getContext('2d')!
     ctx.drawImage(canvas, 0, sourceY, canvas.width, sourceH, 0, 0, canvas.width, sourceH)
 
-    if (y > margin) pdf.addPage()
+    if (pageIndex > 0) pdf.addPage()
     pdf.addImage(sliceCanvas.toDataURL('image/png'), 'PNG', margin, margin, contentWidth, sliceHeight)
 
     remaining -= sliceHeight
-    y = margin
+    pageIndex++
   }
 
   pdf.save(`${filename}.pdf`)

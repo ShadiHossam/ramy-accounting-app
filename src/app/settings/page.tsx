@@ -4,7 +4,7 @@ import { useFinancialStore } from '@/store/financial-store'
 import { Key, Trash2 } from 'lucide-react'
 
 export default function SettingsPage() {
-  const { metrics, clear } = useFinancialStore()
+  const { entries, clear } = useFinancialStore()
 
   return (
     <AppShell title="الإعدادات">
@@ -36,7 +36,7 @@ export default function SettingsPage() {
             <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
               <div>
                 <p className="text-sm font-medium text-gray-700">البيانات المحمّلة</p>
-                <p className="text-gray-400 text-xs">{metrics.length.toLocaleString('ar-EG')} قيمة محمّلة</p>
+                <p className="text-gray-400 text-xs">{entries.length.toLocaleString('ar-EG')} سطر قيد محمّل</p>
               </div>
               <button onClick={async () => {
                 if (confirm('هل أنت متأكد من حذف كل البيانات؟')) await clear()

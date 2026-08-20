@@ -1,78 +1,82 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { SheetName, BalanceSheetSection } from '@/lib/types'
+import { AccountType } from '@/lib/types'
 
 export async function GET() {
-  const [metricRows, balanceRows] = await Promise.all([
-    prisma.monthlyMetric.findMany({ orderBy: [{ year: 'asc' }, { month: 'asc' }] }),
-    prisma.balanceSheetLine.findMany({ orderBy: { id: 'asc' } }),
+  const [accountRows, entryRows] = await Promise.all([
+    prisma.account.findMany({ orderBy: { code: 'asc' } }),
+    prisma.journalLine.findMany({ orderBy: { entryDate: 'asc' } }),
   ])
 
-  const metrics = metricRows.map(r => ({
-    id: r.id, sheet: r.sheet as SheetName, category: r.category, year: r.year, month: r.month, amount: r.amount,
+  const accounts = accountRows.map(a => ({
+    code: a.code, name: a.name, type: a.type as AccountType, parentCode: a.parentCode, level: a.level,
   }))
-  const balanceSheet = balanceRows.map(r => ({
-    id: r.id, label: r.label, code: r.code, section: r.section as BalanceSheetSection,
-    isTotal: r.isTotal, amount: r.amount, asOfDate: r.asOfDate,
+  const entries = entryRows.map(e => ({
+    id: e.id, entryNumber: e.entryNumber, entryDate: e.entryDate, postingDate: e.postingDate,
+    refNumber: e.refNumber, docType: e.docType, description: e.description,
+    accountCode: e.accountCode, accountName: e.accountName, accountType: e.accountType as AccountType,
+    costCenter: e.costCenter, debit: e.debit, credit: e.credit, approvalStatus: e.approvalStatus,
   }))
 
-  return NextResponse.json({ metrics, balanceSheet })
+  return NextResponse.json({ accounts, entries })
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json() as {
-    year: number
-    metrics: Array<{ sheet: SheetName; category: string; month: number; amount: number }>
-    balanceSheet: Array<{ label: string; code: string | null; section: BalanceSheetSection; isTotal: boolean; amount: number }>
-    asOfDate: string | null
+    accounts: Array<{ code: number; name: string; type: AccountType; parentCode: number | null; level: number }>
+    entries: Array<{
+      entryNumber: number; entryDate: string; postingDate: string; refNumber: string; docType: string
+      description: string; accountCode: number; accountName: string; accountType: AccountType
+      costCenter: string; debit: number; credit: number; approvalStatus: string
+    }>
   }
 
-  const asOfDate = body.asOfDate ? new Date(body.asOfDate) : new Date()
+  // Each upload is a full refreshed export of the ledger (not incremental daily rows), so every
+  // upload fully replaces prior data — wrapped in one transaction so a failed insert can't leave
+  // the DB with the old data already deleted and nothing to replace it.
+  const { accountCount, entryCount } = await prisma.$transaction(async (tx) => {
+    await tx.journalLine.deleteMany()
+    await tx.account.deleteMany()
 
-  // Each upload is a full refreshed snapshot of the workbook (not incremental daily rows),
-  // so every upload fully replaces prior data — wrapped in one transaction so a failed insert
-  // can't leave the DB with the old data already deleted and nothing to replace it.
-  const { metricCount, balanceCount } = await prisma.$transaction(async (tx) => {
-    await tx.monthlyMetric.deleteMany()
-    await tx.balanceSheetLine.deleteMany()
-
-    if (body.metrics.length > 0) {
-      await tx.monthlyMetric.createMany({
-        data: body.metrics.map(m => ({
-          id: `${m.sheet}|${m.category}|${body.year}-${m.month}`,
-          sheet: m.sheet,
-          category: m.category,
-          year: body.year,
-          month: m.month,
-          amount: m.amount,
+    if (body.accounts.length > 0) {
+      await tx.account.createMany({
+        data: body.accounts.map(a => ({
+          code: a.code, name: a.name, type: a.type, parentCode: a.parentCode, level: a.level,
         })),
       })
     }
 
-    if (body.balanceSheet.length > 0) {
-      await tx.balanceSheetLine.createMany({
-        data: body.balanceSheet.map((b, i) => ({
-          id: `${b.section}::${b.label}::${i}`,
-          label: b.label,
-          code: b.code,
-          section: b.section,
-          isTotal: b.isTotal,
-          amount: b.amount,
-          asOfDate,
+    if (body.entries.length > 0) {
+      await tx.journalLine.createMany({
+        data: body.entries.map((e, i) => ({
+          id: `${e.entryNumber}-${e.accountCode}-${i}`,
+          entryNumber: e.entryNumber,
+          entryDate: new Date(e.entryDate),
+          postingDate: new Date(e.postingDate),
+          refNumber: e.refNumber,
+          docType: e.docType,
+          description: e.description,
+          accountCode: e.accountCode,
+          accountName: e.accountName,
+          accountType: e.accountType,
+          costCenter: e.costCenter,
+          debit: e.debit,
+          credit: e.credit,
+          approvalStatus: e.approvalStatus,
         })),
       })
     }
 
-    return { metricCount: body.metrics.length, balanceCount: body.balanceSheet.length }
+    return { accountCount: body.accounts.length, entryCount: body.entries.length }
   })
 
-  return NextResponse.json({ metricCount, balanceCount })
+  return NextResponse.json({ accountCount, entryCount })
 }
 
 export async function DELETE() {
   await prisma.$transaction([
-    prisma.monthlyMetric.deleteMany(),
-    prisma.balanceSheetLine.deleteMany(),
+    prisma.journalLine.deleteMany(),
+    prisma.account.deleteMany(),
   ])
   return NextResponse.json({ success: true })
 }

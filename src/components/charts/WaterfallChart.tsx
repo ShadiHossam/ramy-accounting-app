@@ -2,20 +2,14 @@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { formatCurrency } from '@/lib/financial-engine'
 
-interface WaterfallItem {
+interface WaterfallStep {
   label: string
   value: number
   type: 'start' | 'positive' | 'negative' | 'total'
 }
 
 interface Props {
-  totalRevenue: number
-  salesReturns: number
-  netSales: number
-  purchases: number
-  grossProfit: number
-  totalExpenses: number
-  netProfit: number
+  steps: WaterfallStep[]
 }
 
 const COLORS = {
@@ -46,22 +40,15 @@ const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { payl
   )
 }
 
-export default function WaterfallChart({ totalRevenue, salesReturns, netSales, purchases, grossProfit, totalExpenses, netProfit }: Props) {
-  const items: WaterfallItem[] = [
-    { label: 'الإيرادات', value: totalRevenue, type: 'start' },
-    { label: 'مردودات', value: -salesReturns, type: 'negative' },
-    { label: 'صافي المبيعات', value: netSales, type: 'total' },
-    { label: 'المشتريات', value: -purchases, type: 'negative' },
-    { label: 'مجمل الربح', value: grossProfit, type: 'total' },
-    { label: 'المصروفات', value: -totalExpenses, type: 'negative' },
-    { label: 'صافي الربح', value: netProfit, type: 'total' },
-  ]
-
+export default function WaterfallChart({ steps }: Props) {
   // build stacked data: invisible base + visible bar
   let running = 0
-  const chartData = items.map(item => {
+  const chartData = steps.map(item => {
     const isTotal = item.type === 'total' || item.type === 'start'
-    const base = isTotal ? 0 : (item.value >= 0 ? running : running + item.value)
+    // Total/start bars always start from 0 — except when the total itself is negative
+    // (e.g. a net loss), in which case the bar must start at that negative value and rise
+    // to 0, not start at 0 and rise upward, which used to render a loss as a positive bar.
+    const base = isTotal ? Math.min(item.value, 0) : (item.value >= 0 ? running : running + item.value)
     const bar = Math.abs(item.value)
     if (!isTotal) running += item.value
     else running = item.value
@@ -72,7 +59,7 @@ export default function WaterfallChart({ totalRevenue, salesReturns, netSales, p
     <ResponsiveContainer width="100%" height={300}>
       <BarChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 5 }} barCategoryGap="25%">
         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-        <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} />
+        <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748b' }} angle={-25} textAnchor="end" height={60} interval={0} />
         <YAxis tickFormatter={v => (v / 1000).toFixed(0) + 'ك'} tick={{ fontSize: 11, fill: '#64748b' }} />
         <Tooltip content={<CustomTooltip />} />
         <ReferenceLine y={0} stroke="#94a3b8" />

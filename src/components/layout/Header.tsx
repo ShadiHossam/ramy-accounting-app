@@ -16,12 +16,12 @@ const ARABIC_MONTHS = [
 interface Props { title: string; onMenuClick: () => void }
 
 export default function Header({ title, onMenuClick }: Props) {
-  const { period, setPeriod, metrics } = useFinancialStore()
+  const { period, setPeriod, entries } = useFinancialStore()
   const [open, setOpen] = useState(false)
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const ref = useRef<HTMLDivElement>(null)
-  const years = getAvailableYears(metrics)
+  const years = getAvailableYears(entries)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -71,7 +71,7 @@ export default function Header({ title, onMenuClick }: Props) {
                 { label: 'اليوم', action: () => setPeriod(todayPeriod()) },
                 { label: 'هذا الشهر', action: () => setPeriod(thisMonthPeriod()) },
                 { label: 'هذه السنة', action: () => setPeriod(thisYearPeriod()) },
-                { label: 'كل الفترات', action: () => setPeriod(allTimePeriod(metrics)) },
+                { label: 'كل الفترات', action: () => setPeriod(allTimePeriod(entries)) },
               ].map(({ label, action }) => (
                 <button
                   key={label}

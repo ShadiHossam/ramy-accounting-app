@@ -49,8 +49,8 @@ function getServerBudgets() {
 }
 
 export default function BudgetingPage() {
-  const { metrics, period } = useFinancialStore()
-  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
+  const { entries, period } = useFinancialStore()
+  const filtered = useMemo(() => filterByPeriod(entries, period), [entries, period])
   const revSources = useMemo(() => calcRevenueBySource(filtered), [filtered])
   const expCats = useMemo(() => calcExpensesByCategory(filtered), [filtered])
   const printRef = useRef<HTMLDivElement>(null)

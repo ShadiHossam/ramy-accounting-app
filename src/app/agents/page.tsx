@@ -8,8 +8,8 @@ import { cn } from '@/lib/utils'
 import { Users } from 'lucide-react'
 
 export default function AgentsPage() {
-  const { metrics, period } = useFinancialStore()
-  const filtered = useMemo(() => filterByPeriod(metrics, period), [metrics, period])
+  const { entries, period } = useFinancialStore()
+  const filtered = useMemo(() => filterByPeriod(entries, period), [entries, period])
   const revByAgent = useMemo(() => calcRevenueByAnalytical(filtered), [filtered])
   const expByAgent = useMemo(() => calcExpensesByAnalytical(filtered), [filtered])
   const pareto = useMemo(() => calcParetoAnalysis(revByAgent), [revByAgent])
@@ -23,7 +23,7 @@ export default function AgentsPage() {
         <div className="flex flex-col items-center justify-center h-96 text-gray-400 bg-white rounded-xl border border-gray-100">
           <Users className="w-16 h-16 mb-4 opacity-50" />
           <p className="text-xl font-medium mb-2">لا توجد بيانات مندوبين/جهات</p>
-          <p className="text-sm">ملف البيانات المرفوع (الملخص الشهري) لا يحتوي على تفصيل حسب المندوب أو الجهة — فقط إجماليات شهرية</p>
+          <p className="text-sm">دليل الحسابات وقيود اليومية لا يحتويان على بُعد مندوب/جهة — فقط حسابات ومراكز تكلفة</p>
         </div>
       </AppShell>
     )

@@ -58,6 +58,9 @@ export default function UploadPage() {
         body: JSON.stringify({
           accounts,
           entries: entries.map(e => ({ ...e, entryDate: e.entryDate.toISOString(), postingDate: e.postingDate.toISOString() })),
+          // Only a freshly-attached opening balance file should evict the previously stored one —
+          // a journal-only re-upload must leave it in place.
+          replaceOpeningBalance: !!openingFile,
         }),
       })
 
@@ -72,7 +75,11 @@ export default function UploadPage() {
       setMessage(`تم رفع الملف${openingFile ? 'ين' : ''} بنجاح`)
       setErrors(allErrors.slice(0, 30))
 
-      setTimeout(() => router.push('/dashboard'), 2000)
+      // Only skip straight to the dashboard when there's nothing to read — any warning (imbalance,
+      // unknown account, double-booked opening balance, etc.) needs the user's eyes on it first.
+      if (allErrors.length === 0) {
+        setTimeout(() => router.push('/dashboard'), 2000)
+      }
     } catch {
       setState('error')
       setMessage('حدث خطأ أثناء قراءة الملف أو الاتصال بقاعدة البيانات')
@@ -102,7 +109,7 @@ export default function UploadPage() {
         {existing.length > 0 && state === 'idle' && (
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 mb-4">
             <p className="text-amber-300 text-sm">
-              يوجد {existing.length.toLocaleString('ar-EG')} حركة محمّلة حالياً. رفع ملف جديد سيستبدل كل البيانات الحالية بالكامل.
+              يوجد {existing.length.toLocaleString('ar-EG')} حركة محمّلة حالياً. رفع ملف قيود يومية جديد سيستبدل كل الحركات الحالية. الرصيد الافتتاحي المحفوظ سابقاً يبقى كما هو ما لم ترفق ملف رصيد افتتاحي جديد، وفي هذه الحالة يتم استبداله بالكامل.
             </p>
           </div>
         )}
@@ -172,7 +179,17 @@ export default function UploadPage() {
                     </div>
                   </div>
                 )}
-                <p className="text-slate-400 text-sm mt-4">جاري الانتقال للوحة التحكم...</p>
+                {errors.length === 0 ? (
+                  <p className="text-slate-400 text-sm mt-4">جاري الانتقال للوحة التحكم...</p>
+                ) : (
+                  <>
+                    <p className="text-amber-300 text-sm mt-4">راجع التحذيرات أدناه قبل المتابعة</p>
+                    <button onClick={() => router.push('/dashboard')}
+                      className="mt-4 px-6 py-2.5 rounded-xl font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors">
+                      تمام، الانتقال للوحة التحكم
+                    </button>
+                  </>
+                )}
               </>
             ) : (
               <>

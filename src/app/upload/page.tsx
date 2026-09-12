@@ -1,16 +1,16 @@
 'use client'
-import { useCallback, useState, useRef } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { parseExcelFile, parseOpeningBalanceFile, ParsedAccount, ParsedJournalLine } from '@/lib/excel-parser'
 import { useFinancialStore } from '@/store/financial-store'
-import { FileSpreadsheet, CheckCircle, AlertCircle, X, RefreshCw, FileUp, Wallet } from 'lucide-react'
+import { FileSpreadsheet, CheckCircle, AlertCircle, X, RefreshCw, FileUp, Wallet, LayoutDashboard } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 type UploadState = 'idle' | 'parsing' | 'success' | 'error'
 
 export default function UploadPage() {
   const router = useRouter()
-  const { entries: existing, loadFromDB } = useFinancialStore()
+  const { entries: existing, dbLoaded, loadFromDB } = useFinancialStore()
   const [journalFile, setJournalFile] = useState<File | null>(null)
   const [openingFile, setOpeningFile] = useState<File | null>(null)
   const [state, setState] = useState<UploadState>('idle')
@@ -19,6 +19,13 @@ export default function UploadPage() {
   const [errors, setErrors] = useState<string[]>([])
   const journalInputRef = useRef<HTMLInputElement>(null)
   const openingInputRef = useRef<HTMLInputElement>(null)
+
+  // This page lives outside AppShell, so on a fresh visit nothing has pulled the saved data yet.
+  // Only succeeds for a logged-in user — anonymous uploaders get a 401 and see the generic warning,
+  // never the stored entry count.
+  useEffect(() => {
+    if (!dbLoaded) loadFromDB()
+  }, [dbLoaded, loadFromDB])
 
   const process = useCallback(async () => {
     if (!journalFile) return
@@ -106,10 +113,11 @@ export default function UploadPage() {
           <p className="text-slate-400">ارفع ملف قيود اليومية، ورصيد افتتاحي اختياري، لبدء التحليل المالي الشامل</p>
         </div>
 
-        {existing.length > 0 && state === 'idle' && (
+        {state === 'idle' && (
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 mb-4">
             <p className="text-amber-300 text-sm">
-              يوجد {existing.length.toLocaleString('ar-EG')} حركة محمّلة حالياً. رفع ملف قيود يومية جديد سيستبدل كل الحركات الحالية. الرصيد الافتتاحي المحفوظ سابقاً يبقى كما هو ما لم ترفق ملف رصيد افتتاحي جديد، وفي هذه الحالة يتم استبداله بالكامل.
+              {existing.length > 0 ? `يوجد ${existing.length.toLocaleString('ar-EG')} حركة محمّلة حالياً. ` : ''}
+              رفع ملف قيود يومية جديد سيستبدل كل الحركات المحفوظة حالياً. الرصيد الافتتاحي المحفوظ سابقاً يبقى كما هو ما لم ترفق ملف رصيد افتتاحي جديد، وفي هذه الحالة يتم استبداله بالكامل.
             </p>
           </div>
         )}
@@ -147,6 +155,12 @@ export default function UploadPage() {
             <button onClick={process} disabled={!journalFile}
               className="w-full py-3 rounded-xl font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white transition-colors">
               رفع ومعالجة الملفات
+            </button>
+
+            <button onClick={() => router.push('/dashboard')}
+              className="w-full py-3 rounded-xl font-semibold border border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/10 transition-colors flex items-center justify-center gap-2">
+              <LayoutDashboard className="w-5 h-5" />
+              الدخول للنظام بدون رفع
             </button>
           </div>
         )}

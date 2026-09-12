@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, TrendingUp, TrendingDown, FileText, Scale,
   ArrowLeftRight, BarChart3, Users, Target, PieChart,
-  Upload, Sparkles, X
+  Upload, Sparkles, X, LogOut
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -30,6 +30,12 @@ interface Props {
 
 export default function Sidebar({ open, onClose }: Props) {
   const pathname = usePathname()
+
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
+    // Full navigation so the in-memory financial data is dropped along with the session.
+    window.location.assign('/login')
+  }
 
   return (
     <>
@@ -83,7 +89,12 @@ export default function Sidebar({ open, onClose }: Props) {
           })}
         </nav>
 
-        <div className="p-4 border-t border-slate-700">
+        <div className="p-4 border-t border-slate-700 space-y-3">
+          <button onClick={logout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-slate-300 hover:bg-slate-800 hover:text-red-400 transition-colors">
+            <LogOut className="w-4 h-4 flex-shrink-0" />
+            <span>تسجيل الخروج</span>
+          </button>
           <p className="text-slate-500 text-xs text-center">v1.0.0 · Usine Accounting AI</p>
         </div>
       </aside>

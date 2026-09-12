@@ -37,6 +37,8 @@ export const useFinancialStore = create<FinancialStore>()(
       loadFromDB: async () => {
         try {
           const res = await fetch('/api/financial-data')
+          // Not logged in (e.g. an anonymous uploader on /upload) — expected, not an error.
+          if (res.status === 401) return
           if (!res.ok) throw new Error(`فشل تحميل البيانات (${res.status})`)
           const { accounts, entries } = await res.json() as {
             accounts: Account[]

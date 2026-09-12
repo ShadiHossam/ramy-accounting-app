@@ -38,6 +38,9 @@ export interface BalanceSheetLine {
   isTotal: boolean
   amount: number
   asOfDate: Date
+  // Nesting depth under the root account (0 = root total) — the chart can go any number of levels
+  // deep (e.g. 1000 › 1100 › 1110 العملاء › 11101 AR/ايرجنت), so rows are indented by this.
+  depth: number
 }
 
 // Only the standard, non-discretionary formula: Net Profit = Revenue - Expenses.

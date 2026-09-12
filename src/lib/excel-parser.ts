@@ -46,58 +46,153 @@ function stripTatweel(s: string): string {
   return s.replace(/ـ/g, '').trim()
 }
 
+// Finds the header row by looking for `marker` in ANY cell (not a fixed position), then maps
+// every header cell's text -> its column index. Callers look columns up by Arabic name instead
+// of hardcoding an index, so inserting/reordering/appending columns in the sheet can't silently
+// shift which data lands in which field — only renaming/removing a header the app depends on can.
+function findHeaderRow(rows: unknown[][], marker: string): { idx: number; hmap: Map<string, number> } | null {
+  const idx = rows.findIndex(r => Array.isArray(r) && r.some(cell => stripTatweel(String(cell ?? '')) === marker))
+  if (idx === -1) return null
+  const hmap = new Map<string, number>()
+  const row = rows[idx] as unknown[]
+  row.forEach((cell, i) => {
+    const key = stripTatweel(String(cell ?? ''))
+    if (key && !hmap.has(key)) hmap.set(key, i)
+  })
+  return { idx, hmap }
+}
+
 // كود الحساب | اسم الحساب | نوع الحساب | الحساب الرئيسي | المستوى | الحالة
 function parseAccounts(ws: XLSX.WorkSheet, errors: string[]): ParsedAccount[] {
   const rows = sheetRows(ws)
-  const headerIdx = rows.findIndex(r => String(r?.[0] ?? '').trim() === 'كود الحساب')
-  if (headerIdx === -1) {
+  const header = findHeaderRow(rows, 'كود الحساب')
+  if (!header) {
     errors.push('تعذر إيجاد صف رؤوس الأعمدة (كود الحساب) في شيت "دليل الحسابات"')
+    return []
+  }
+  const { idx: headerIdx, hmap } = header
+
+  const codeCol = hmap.get('كود الحساب')
+  const nameCol = hmap.get('اسم الحساب')
+  const typeCol = hmap.get('نوع الحساب')
+  const parentCol = hmap.get('الحساب الرئيسي')
+  const levelCol = hmap.get('المستوى')
+  if (codeCol === undefined || nameCol === undefined || typeCol === undefined) {
+    errors.push('أعمدة أساسية مفقودة في شيت "دليل الحسابات" (كود الحساب / اسم الحساب / نوع الحساب) — تأكد من عدم إعادة تسميتها')
     return []
   }
 
   const accounts: ParsedAccount[] = []
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i] as unknown[]
-    const code = row?.[0]
+    const code = row?.[codeCol]
     if (!isNum(code)) continue
 
-    const type = String(row?.[2] ?? '').trim() as AccountType
+    const type = String(row?.[typeCol] ?? '').trim() as AccountType
     if (!ACCOUNT_TYPES.includes(type)) {
-      errors.push(`الحساب ${code} له نوع غير معروف: "${row?.[2]}" — تم تجاهله`)
+      errors.push(`الحساب ${code} له نوع غير معروف: "${row?.[typeCol]}" — تم تجاهله`)
       continue
     }
 
-    const parentRaw = row?.[3]
+    const parentRaw = parentCol !== undefined ? row?.[parentCol] : undefined
     const parentCode = isNum(parentRaw) ? parentRaw : null
 
     accounts.push({
       code,
-      name: String(row?.[1] ?? '').trim(),
+      name: String(row?.[nameCol] ?? '').trim(),
       type,
       parentCode,
-      level: isNum(row?.[4]) ? row[4] : 1,
+      level: levelCol !== undefined && isNum(row?.[levelCol]) ? row[levelCol] : 1,
     })
   }
+  resolveHierarchyByCode(accounts)
   return accounts
+}
+
+function isDescendantOf(code: number, ancestor: number, byCode: Map<number, ParsedAccount>): boolean {
+  let cur = byCode.get(code)
+  // Bounded walk so a malformed chart (an account naming itself or a loop as its parent) can't hang.
+  for (let guard = 0; cur && cur.parentCode !== null && guard < 20; guard++) {
+    if (cur.parentCode === ancestor) return true
+    cur = byCode.get(cur.parentCode)
+  }
+  return false
+}
+
+// Analytical sub-accounts get added by extending a code (1110 العملاء → 11101, 11102...) while
+// الحساب الرئيسي is often left pointing at the old group (1100) — read literally, that lists them as
+// siblings of 1110 and counts العملاء twice. The code prefix is the accountant's real intent, so a
+// sub-account is re-parented under the deepest same-type account whose code prefixes its own — but
+// only when that account itself sits under the declared parent. That keeps 21020 under its declared
+// 2101 instead of pulling it under the unrelated 2102 just because "21020" happens to start with "2102".
+function resolveHierarchyByCode(accounts: ParsedAccount[]): void {
+  const byCode = new Map(accounts.map(a => [a.code, a]))
+  const reparented: ParsedAccount[] = []
+
+  for (const acc of accounts) {
+    const s = String(acc.code)
+    for (let len = s.length - 1; len > 0; len--) {
+      const candidate = byCode.get(Number(s.slice(0, len)))
+      if (!candidate || candidate.type !== acc.type) continue
+      if (candidate.code === acc.parentCode) break
+      if (acc.parentCode === null || isDescendantOf(candidate.code, acc.parentCode, byCode)) {
+        acc.parentCode = candidate.code
+        reparented.push(acc)
+        break
+      }
+    }
+  }
+
+  for (const acc of reparented) {
+    let level = 1
+    let cur: ParsedAccount | undefined = acc
+    for (let guard = 0; cur && cur.parentCode !== null && guard < 20; guard++) {
+      level++
+      cur = byCode.get(cur.parentCode)
+    }
+    acc.level = level
+  }
 }
 
 // رقم القيد | تاريخ القيد | تاريخ الترحيل | رقم المرجع | نوع المستند | البيان | كود الحساب |
 // اسم الحساب | مركز التكلفة | مدين | دائن | حالة الاعتماد
+// (اسم الحساب is deliberately never read here — the account name always comes from
+// accountsByCode, so دليل الحسابات stays the single source of truth for it.)
 function parseJournal(ws: XLSX.WorkSheet, accountsByCode: Map<number, ParsedAccount>, errors: string[]): ParsedJournalLine[] {
   const rows = sheetRows(ws)
-  const headerIdx = rows.findIndex(r => String(r?.[0] ?? '').trim() === 'رقم القيد')
-  if (headerIdx === -1) {
+  const header = findHeaderRow(rows, 'رقم القيد')
+  if (!header) {
     errors.push('تعذر إيجاد صف رؤوس الأعمدة (رقم القيد) في شيت "قيود اليومية"')
+    return []
+  }
+  const { idx: headerIdx, hmap } = header
+
+  const col = {
+    entryNumber: hmap.get('رقم القيد'),
+    entryDate: hmap.get('تاريخ القيد'),
+    postingDate: hmap.get('تاريخ الترحيل'),
+    refNumber: hmap.get('رقم المرجع'),
+    docType: hmap.get('نوع المستند'),
+    description: hmap.get('البيان'),
+    accountCode: hmap.get('كود الحساب'),
+    costCenter: hmap.get('مركز التكلفة'),
+    debit: hmap.get('مدين'),
+    credit: hmap.get('دائن'),
+    approvalStatus: hmap.get('حالة الاعتماد'),
+  }
+  if (col.entryNumber === undefined || col.entryDate === undefined || col.accountCode === undefined
+    || col.debit === undefined || col.credit === undefined) {
+    errors.push('أعمدة أساسية مفقودة في شيت "قيود اليومية" (رقم القيد / تاريخ القيد / كود الحساب / مدين / دائن) — تأكد من عدم إعادة تسميتها')
     return []
   }
 
   const entries: ParsedJournalLine[] = []
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i] as unknown[]
-    const entryNumber = row?.[0]
+    const entryNumber = row?.[col.entryNumber]
     if (!isNum(entryNumber)) continue
 
-    const accountCode = row?.[6]
+    const accountCode = row?.[col.accountCode]
     if (!isNum(accountCode)) {
       errors.push(`القيد رقم ${entryNumber}: كود حساب غير صالح — تم تجاهل السطر`)
       continue
@@ -109,8 +204,8 @@ function parseJournal(ws: XLSX.WorkSheet, accountsByCode: Map<number, ParsedAcco
       continue
     }
 
-    const entryDate = asDate(row?.[1])
-    const postingDate = asDate(row?.[2]) ?? entryDate
+    const entryDate = asDate(row?.[col.entryDate])
+    const postingDate = (col.postingDate !== undefined ? asDate(row?.[col.postingDate]) : null) ?? entryDate
     if (!entryDate) {
       errors.push(`القيد رقم ${entryNumber}: تاريخ القيد غير صالح — تم تجاهل السطر`)
       continue
@@ -120,16 +215,16 @@ function parseJournal(ws: XLSX.WorkSheet, accountsByCode: Map<number, ParsedAcco
       entryNumber,
       entryDate,
       postingDate: postingDate ?? entryDate,
-      refNumber: String(row?.[3] ?? '').trim(),
-      docType: String(row?.[4] ?? '').trim(),
-      description: String(row?.[5] ?? '').trim(),
+      refNumber: col.refNumber !== undefined ? String(row?.[col.refNumber] ?? '').trim() : '',
+      docType: col.docType !== undefined ? String(row?.[col.docType] ?? '').trim() : '',
+      description: col.description !== undefined ? String(row?.[col.description] ?? '').trim() : '',
       accountCode,
       accountName: account.name,
       accountType: account.type,
-      costCenter: String(row?.[8] ?? '').trim(),
-      debit: isNum(row?.[9]) ? row[9] : 0,
-      credit: isNum(row?.[10]) ? row[10] : 0,
-      approvalStatus: String(row?.[11] ?? '').trim(),
+      costCenter: col.costCenter !== undefined ? String(row?.[col.costCenter] ?? '').trim() : '',
+      debit: isNum(row?.[col.debit]) ? (row[col.debit] as number) : 0,
+      credit: isNum(row?.[col.credit]) ? (row[col.credit] as number) : 0,
+      approvalStatus: col.approvalStatus !== undefined ? String(row?.[col.approvalStatus] ?? '').trim() : '',
     })
   }
 
@@ -191,6 +286,7 @@ function parseOpeningBalance(
   // monthly-summary balance-sheet parser tracked assets/liabilities/equity sections.
   let section: AccountType | null = null
 
+  const sheetLines: { rawLabel: string; code: number; amount: number; section: AccountType | null }[] = []
   for (const row of rows) {
     const rawLabel = String(row?.[0] ?? '').trim()
     if (!rawLabel) continue
@@ -203,6 +299,30 @@ function parseOpeningBalance(
     const code = row?.[1]
     const amount = row?.[2]
     if (!isNum(code) || !isNum(amount)) continue
+    sheetLines.push({ rawLabel, code, amount, section })
+  }
+
+  // A code whose sub-accounts ALSO carry their own balance rows in this sheet is a rollup (e.g.
+  // 1110 العملاء = 11102 + 11105, 2101 الموردون = 21011 + 21013 + ...) — posting both would count the
+  // same money twice, so only the sub-accounts are posted, regardless of row order. When the rollup
+  // equals its sub-accounts' sum it's just a subtotal and needs no warning; only a real mismatch in
+  // the file is flagged. A parent whose sub-accounts have no rows here keeps its own balance.
+  const rollupCodes = new Set(
+    sheetLines
+      .filter(l => sheetLines.some(o => o.code !== l.code && isDescendantOf(o.code, l.code, accountsByCode)))
+      .map(l => l.code)
+  )
+
+  for (const { rawLabel, code, amount, section } of sheetLines) {
+    if (rollupCodes.has(code)) {
+      const subTotal = sheetLines
+        .filter(o => !rollupCodes.has(o.code) && isDescendantOf(o.code, code, accountsByCode))
+        .reduce((s, o) => s + o.amount, 0)
+      if (Math.abs(subTotal - amount) > 0.01) {
+        errors.push(`رصيد الحساب الرئيسي "${rawLabel}" (كود ${code}) = ${amount.toLocaleString('ar-EG')} لا يساوي مجموع حساباته الفرعية في الملف = ${subTotal.toLocaleString('ar-EG')} — تم احتساب الحسابات الفرعية فقط`)
+      }
+      continue
+    }
 
     let account = accountsByCode.get(code)
     if (!account) {

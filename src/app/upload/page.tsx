@@ -204,10 +204,10 @@ export default function UploadPage() {
         )}
 
         {errors.length > 0 && (
-          <div className="mt-4 bg-red-500/10 border border-red-500/30 rounded-xl p-4">
-            <p className="text-red-400 text-sm font-medium mb-2">تحذيرات أثناء القراءة:</p>
+          <div className="mt-4 bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
+            <p className="text-amber-400 text-sm font-medium mb-2">تحذيرات أثناء القراءة (تم الرفع، لكن راجع هذه الملاحظات على بيانات الملف):</p>
             <div className="max-h-40 overflow-y-auto space-y-1">
-              {errors.map((e, i) => <p key={i} className="text-red-300 text-xs font-mono">{e}</p>)}
+              {errors.map((e, i) => <p key={i} className="text-amber-200 text-xs font-mono">{e}</p>)}
             </div>
           </div>
         )}

@@ -175,29 +175,44 @@ export function calcBalanceSheet(entries: JournalLine[], accounts: Account[], as
     const root = accounts.find(a => a.level === 1 && a.type === type)
     if (!root) continue
 
-    const level2 = accounts.filter(a => a.parentCode === root.code).sort((a, b) => a.code - b.code)
-    let rootTotal = 0
+    const visited = new Set<number>([root.code])
 
-    for (const group of level2) {
-      const leaves = accounts.filter(a => a.parentCode === group.code).sort((a, b) => a.code - b.code)
+    // Walks the account tree to any depth (1000 › 1100 › 1110 العملاء › 11101 AR/ايرجنت): an account
+    // with no sub-accounts is a plain line (e.g. equity accounts sitting directly under the root); one
+    // with sub-accounts gets their lines followed by a مجموع subtotal. Anything posted directly to a
+    // parent rather than to its sub-accounts still gets its own line inside that subtotal, so no
+    // balance is ever dropped just because the account has children.
+    const emit = (account: Account, depth: number): number => {
+      const own = byCode.get(account.code) ?? 0
+      const children = accounts
+        .filter(a => a.parentCode === account.code && !visited.has(a.code))
+        .sort((a, b) => a.code - b.code)
+      children.forEach(c => visited.add(c.code))
 
-      if (leaves.length === 0) {
-        // The group itself has no children — it's a leaf account (e.g. equity accounts sit
-        // directly under the root with no intermediate grouping level).
-        const amount = byCode.get(group.code) ?? 0
-        lines.push({ id: `acct-${group.code}`, label: group.name, code: String(group.code), section, isTotal: false, amount, asOfDate })
-        rootTotal += amount
-      } else {
-        let groupTotal = 0
-        for (const leaf of leaves) {
-          const amount = byCode.get(leaf.code) ?? 0
-          lines.push({ id: `acct-${leaf.code}`, label: leaf.name, code: String(leaf.code), section, isTotal: false, amount, asOfDate })
-          groupTotal += amount
-        }
-        lines.push({ id: `grp-${group.code}`, label: `مجموع ${group.name}`, code: String(group.code), section, isTotal: true, amount: groupTotal, asOfDate })
-        rootTotal += groupTotal
+      if (children.length === 0) {
+        lines.push({ id: `acct-${account.code}`, label: account.name, code: String(account.code), section, isTotal: false, amount: own, asOfDate, depth })
+        return own
       }
+
+      let total = 0
+      if (Math.abs(own) > 0.005) {
+        lines.push({ id: `acct-${account.code}`, label: `${account.name} (رصيد مباشر)`, code: String(account.code), section, isTotal: false, amount: own, asOfDate, depth: depth + 1 })
+        total += own
+      }
+      for (const child of children) total += emit(child, depth + 1)
+      lines.push({ id: `grp-${account.code}`, label: `مجموع ${account.name}`, code: String(account.code), section, isTotal: true, amount: total, asOfDate, depth })
+      return total
     }
+
+    let rootTotal = 0
+    const rootOwn = byCode.get(root.code) ?? 0
+    if (Math.abs(rootOwn) > 0.005) {
+      lines.push({ id: `acct-${root.code}`, label: `${root.name} (رصيد مباشر)`, code: String(root.code), section, isTotal: false, amount: rootOwn, asOfDate, depth: 1 })
+      rootTotal += rootOwn
+    }
+    const topLevel = accounts.filter(a => a.parentCode === root.code && a.code !== root.code).sort((a, b) => a.code - b.code)
+    topLevel.forEach(a => visited.add(a.code))
+    for (const account of topLevel) rootTotal += emit(account, 1)
 
     // Standard interim-reporting convention: current-period net income sits in equity until a
     // formal closing entry moves it into retained earnings. Without this line the balance sheet
@@ -206,16 +221,16 @@ export function calcBalanceSheet(entries: JournalLine[], accounts: Account[], as
     // Revenue-Expenses formula used everywhere else — not a new judgment call.
     if (type === 'حقوق ملكية') {
       const periodProfit = sumByType(upTo, 'إيرادات') - sumByType(upTo, 'مصروفات')
-      lines.push({ id: 'equity-period-profit', label: 'أرباح (خسائر) الفترة الحالية — غير مُقفلة', code: null, section, isTotal: false, amount: periodProfit, asOfDate })
+      lines.push({ id: 'equity-period-profit', label: 'أرباح (خسائر) الفترة الحالية — غير مُقفلة', code: null, section, isTotal: false, amount: periodProfit, asOfDate, depth: 1 })
       rootTotal += periodProfit
     }
 
-    lines.push({ id: `root-${root.code}`, label: `إجمالي ${root.name}`, code: String(root.code), section, isTotal: true, amount: rootTotal, asOfDate })
+    lines.push({ id: `root-${root.code}`, label: `إجمالي ${root.name}`, code: String(root.code), section, isTotal: true, amount: rootTotal, asOfDate, depth: 0 })
     rootTotals[section] = rootTotal
   }
 
   const combined = (rootTotals.liabilities ?? 0) + (rootTotals.equity ?? 0)
-  lines.push({ id: 'combined-liab-equity', label: 'إجمالي الالتزامات وحقوق الملكية', code: null, section: 'liabilities', isTotal: true, amount: combined, asOfDate })
+  lines.push({ id: 'combined-liab-equity', label: 'إجمالي الالتزامات وحقوق الملكية', code: null, section: 'liabilities', isTotal: true, amount: combined, asOfDate, depth: 0 })
 
   return lines
 }

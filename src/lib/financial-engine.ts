@@ -63,9 +63,9 @@ export function calcSummary(entries: JournalLine[]): FinancialSummary {
 // Groups by the account's own literal name from دليل الحسابات — never an invented bucket.
 function byAccount(entries: JournalLine[], type: AccountType): CategoryBreakdown[] {
   const relevant = entries.filter(e => e.accountType === type)
-  const map = new Map<string, { amount: number; count: number }>()
+  const map = new Map<string, { amount: number; count: number; code: number }>()
   for (const e of relevant) {
-    const cur = map.get(e.accountName) ?? { amount: 0, count: 0 }
+    const cur = map.get(e.accountName) ?? { amount: 0, count: 0, code: e.accountCode }
     cur.amount += netMovement(type, e.debit, e.credit)
     cur.count += 1
     map.set(e.accountName, cur)
@@ -74,7 +74,7 @@ function byAccount(entries: JournalLine[], type: AccountType): CategoryBreakdown
 
   return Array.from(map.entries())
     .filter(([, v]) => v.amount !== 0)
-    .map(([name, v]) => ({ name, amount: v.amount, percentage: total > 0 ? (v.amount / total) * 100 : 0, count: v.count }))
+    .map(([name, v]) => ({ name, code: v.code, amount: v.amount, percentage: total > 0 ? (v.amount / total) * 100 : 0, count: v.count }))
     .sort((a, b) => b.amount - a.amount)
 }
 

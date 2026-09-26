@@ -66,6 +66,8 @@ export interface CategoryBreakdown {
   amount: number
   percentage: number
   count: number
+  // Account code from دليل الحسابات — set only when the breakdown is per-account (not per cost center).
+  code?: number
 }
 
 export interface PeriodFilter {

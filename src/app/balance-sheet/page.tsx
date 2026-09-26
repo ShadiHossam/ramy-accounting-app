@@ -6,6 +6,7 @@ import { useFinancialStore } from '@/store/financial-store'
 import { formatCurrency, calcBalanceSheet } from '@/lib/financial-engine'
 import { Printer, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import CodeBadge from '@/components/ui/CodeBadge'
 import { BalanceSheetLine, BalanceSheetSection } from '@/lib/types'
 
 export default function BalanceSheetPage() {
@@ -105,7 +106,9 @@ export default function BalanceSheetPage() {
 function BalRow({ line }: { line: BalanceSheetLine }) {
   return (
     <div className={cn('flex justify-between items-center py-2', line.isTotal ? 'font-bold border-t border-gray-100 mt-1 pt-2' : '')}>
-      <span className={cn('text-sm text-gray-700', line.isTotal ? 'font-bold' : '')} style={{ paddingInlineStart: `${Math.max(line.depth - 1, 0) * 16}px` }}>{line.label}</span>
+      <span className={cn('text-sm text-gray-700', line.isTotal ? 'font-bold' : '')} style={{ paddingInlineStart: `${Math.max(line.depth - 1, 0) * 16}px` }}>
+        <CodeBadge code={line.code} />{line.label}
+      </span>
       <span className={cn('text-sm font-medium min-w-[140px] text-left', line.amount >= 0 ? 'text-gray-900' : 'text-red-600')}>
         {formatCurrency(line.amount)}
       </span>

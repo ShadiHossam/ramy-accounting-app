@@ -7,6 +7,7 @@ import { Printer, TrendingUp, TrendingDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import WaterfallChart from '@/components/charts/WaterfallChart'
 import ExportButton from '@/components/ui/ExportButton'
+import CodeBadge from '@/components/ui/CodeBadge'
 
 export default function IncomeStatementPage() {
   const { entries, period } = useFinancialStore()
@@ -29,11 +30,11 @@ export default function IncomeStatementPage() {
         ['قائمة الدخل', period.label],
         [],
         ['الإيرادات حسب الحساب', ''],
-        ...revSources.map(r => [r.name, r.amount]),
+        ...revSources.map(r => [r.code ? `${r.code} - ${r.name}` : r.name, r.amount]),
         ['إجمالي الإيرادات', s.totalRevenue],
         [],
         ['المصروفات حسب الحساب', ''],
-        ...expCats.map(e => [e.name, e.amount]),
+        ...expCats.map(e => [e.code ? `${e.code} - ${e.name}` : e.name, e.amount]),
         ['إجمالي المصروفات', s.totalExpenses],
         [],
         ['صافي الربح', s.netProfit],
@@ -73,7 +74,7 @@ export default function IncomeStatementPage() {
             <div className="divide-y divide-gray-50">
               {revSources.map((r, i) => (
                 <div key={i} className="flex justify-between items-center py-2 pr-2">
-                  <span className="text-sm text-gray-600">{r.name}</span>
+                  <span className="text-sm text-gray-600"><CodeBadge code={r.code} />{r.name}</span>
                   <span className="text-sm font-medium text-emerald-600">{formatCurrency(r.amount)}</span>
                 </div>
               ))}
@@ -90,7 +91,7 @@ export default function IncomeStatementPage() {
             <div className="divide-y divide-gray-50">
               {expCats.map((e, i) => (
                 <div key={i} className="flex justify-between items-center py-2 pr-2">
-                  <span className="text-sm text-gray-600">{e.name}</span>
+                  <span className="text-sm text-gray-600"><CodeBadge code={e.code} />{e.name}</span>
                   <span className="text-sm font-medium text-red-500">({formatCurrency(e.amount)})</span>
                 </div>
               ))}

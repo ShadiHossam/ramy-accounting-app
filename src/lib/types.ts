@@ -70,6 +70,35 @@ export interface CategoryBreakdown {
   code?: number
 }
 
+export type CashFlowSection = 'operating' | 'investing' | 'financing'
+
+// One grouped line of the indirect cash flow statement — a node of دليل الحسابات (e.g. 1110 العملاء)
+// with its sub-accounts' cash effects rolled up. amount > 0 = cash in, < 0 = cash out.
+export interface CashFlowLine {
+  code: number
+  name: string
+  accountType: AccountType
+  amount: number
+  children: { code: number; name: string; amount: number }[]
+}
+
+export interface IndirectCashFlow {
+  netProfit: number
+  // Non-cash expenses (e.g. الإهلاك) — expense debits whose credit side is a non-current asset.
+  depreciation: number
+  operating: CashFlowLine[]
+  investing: CashFlowLine[]
+  financing: CashFlowLine[]
+  operatingTotal: number
+  investingTotal: number
+  financingTotal: number
+  netChange: number
+  openingCash: number
+  // Closing cash read straight off the selected cash accounts — compared against
+  // openingCash + netChange so any unbalanced entry in the source file shows up as a difference.
+  closingCash: number
+}
+
 export interface PeriodFilter {
   type: 'day' | 'month' | 'year' | 'quarter' | 'custom'
   startDate: Date

@@ -3,16 +3,45 @@ import { useCallback, useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { parseExcelFile, parseOpeningBalanceFile, ParsedAccount, ParsedJournalLine } from '@/lib/excel-parser'
 import { useFinancialStore } from '@/store/financial-store'
-import { FileSpreadsheet, CheckCircle, AlertCircle, X, RefreshCw, FileUp, Wallet, LayoutDashboard } from 'lucide-react'
+import { FileSpreadsheet, CheckCircle, AlertCircle, X, RefreshCw, FileUp, Wallet, LayoutDashboard, Link2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 type UploadState = 'idle' | 'parsing' | 'success' | 'error'
+
+const LINK_KEYS = { journal: 'sheetLink.journal', opening: 'sheetLink.opening' } as const
+
+function readSavedLink(key: string): string {
+  try { return localStorage.getItem(key) ?? '' } catch { return '' }
+}
+function saveLink(key: string, value: string) {
+  try { if (value) localStorage.setItem(key, value); else localStorage.removeItem(key) } catch {}
+}
+
+// A message we can show the user as-is (the API's own Arabic explanation), vs. an unexpected failure.
+class SheetError extends Error {}
+
+// Downloads a Google Sheet through our API (Google blocks reading the export cross-origin) and wraps
+// it as a File so the existing Excel parser handles it exactly like an uploaded workbook.
+async function fetchSheetAsFile(link: string, name: string): Promise<File> {
+  const res = await fetch('/api/sheet-import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: link }),
+  })
+  if (!res.ok) {
+    const { error } = await res.json().catch(() => ({ error: '' })) as { error?: string }
+    throw new SheetError(error || 'تعذر تحميل شيت جوجل')
+  }
+  return new File([await res.blob()], name)
+}
 
 export default function UploadPage() {
   const router = useRouter()
   const { entries: existing, dbLoaded, loadFromDB } = useFinancialStore()
   const [journalFile, setJournalFile] = useState<File | null>(null)
   const [openingFile, setOpeningFile] = useState<File | null>(null)
+  const [journalLink, setJournalLink] = useState('')
+  const [openingLink, setOpeningLink] = useState('')
   const [state, setState] = useState<UploadState>('idle')
   const [message, setMessage] = useState('')
   const [stats, setStats] = useState<{ accountCount: number; entryCount: number } | null>(null)
@@ -27,14 +56,35 @@ export default function UploadPage() {
     if (!dbLoaded) loadFromDB()
   }, [dbLoaded, loadFromDB])
 
+  // Remember the sheet links so a monthly refresh is just one click. Read after mount (not in the
+  // useState initializer) because localStorage doesn't exist during SSR and would cause a hydration mismatch.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setJournalLink(readSavedLink(LINK_KEYS.journal))
+    setOpeningLink(readSavedLink(LINK_KEYS.opening))
+  }, [])
+
+  // An attached file wins over a link for the same slot.
+  const journalSource = journalFile ?? (journalLink.trim() || null)
+  const openingSource = openingFile ?? (openingLink.trim() || null)
+
   const process = useCallback(async () => {
-    if (!journalFile) return
+    if (!journalSource) return
     setState('parsing')
     setErrors([])
 
     try {
+      let journalInput: File
+      if (typeof journalSource === 'string') {
+        setMessage('جاري تحميل شيت قيود اليومية من جوجل...')
+        journalInput = await fetchSheetAsFile(journalSource, 'journal.xlsx')
+        saveLink(LINK_KEYS.journal, journalSource)
+      } else {
+        journalInput = journalSource
+      }
+
       setMessage('جاري قراءة ملف قيود اليومية...')
-      const journal = await parseExcelFile(journalFile)
+      const journal = await parseExcelFile(journalInput)
 
       if (journal.accounts.length === 0 || journal.entries.length === 0) {
         setState('error')
@@ -47,9 +97,18 @@ export default function UploadPage() {
       let entries: ParsedJournalLine[] = journal.entries
       let allErrors = [...journal.errors]
 
-      if (openingFile) {
+      if (openingSource) {
+        let openingInput: File
+        if (typeof openingSource === 'string') {
+          setMessage('جاري تحميل شيت الرصيد الافتتاحي من جوجل...')
+          openingInput = await fetchSheetAsFile(openingSource, 'opening.xlsx')
+          saveLink(LINK_KEYS.opening, openingSource)
+        } else {
+          openingInput = openingSource
+        }
+
         setMessage('جاري قراءة ملف الرصيد الافتتاحي...')
-        const opening = await parseOpeningBalanceFile(openingFile, accounts)
+        const opening = await parseOpeningBalanceFile(openingInput, accounts)
         accounts = [...accounts, ...opening.extraAccounts]
         // Opening balance lines come first chronologically — every real transaction accumulates
         // on top of them, exactly like they would in the physical books.
@@ -67,7 +126,7 @@ export default function UploadPage() {
           entries: entries.map(e => ({ ...e, entryDate: e.entryDate.toISOString(), postingDate: e.postingDate.toISOString() })),
           // Only a freshly-attached opening balance file should evict the previously stored one —
           // a journal-only re-upload must leave it in place.
-          replaceOpeningBalance: !!openingFile,
+          replaceOpeningBalance: !!openingSource,
         }),
       })
 
@@ -79,7 +138,7 @@ export default function UploadPage() {
       setStats({ accountCount, entryCount })
 
       setState('success')
-      setMessage(`تم رفع الملف${openingFile ? 'ين' : ''} بنجاح`)
+      setMessage(`تم رفع الملف${openingSource ? 'ين' : ''} بنجاح`)
       setErrors(allErrors.slice(0, 30))
 
       // Only skip straight to the dashboard when there's nothing to read — any warning (imbalance,
@@ -87,11 +146,11 @@ export default function UploadPage() {
       if (allErrors.length === 0) {
         setTimeout(() => router.push('/dashboard'), 2000)
       }
-    } catch {
+    } catch (err) {
       setState('error')
-      setMessage('حدث خطأ أثناء قراءة الملف أو الاتصال بقاعدة البيانات')
+      setMessage(err instanceof SheetError ? err.message : 'حدث خطأ أثناء قراءة الملف أو الاتصال بقاعدة البيانات')
     }
-  }, [journalFile, openingFile, loadFromDB, router])
+  }, [journalSource, openingSource, loadFromDB, router])
 
   const pickJournal = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -133,7 +192,25 @@ export default function UploadPage() {
                 <p className="text-white font-semibold">ملف قيود اليومية <span className="text-red-400">*</span></p>
                 <p className="text-slate-400 text-sm truncate">{journalFile ? journalFile.name : 'دليل الحسابات + قيود اليومية — مطلوب'}</p>
               </div>
+              {journalFile && (
+                <span onClick={(e) => { e.stopPropagation(); setJournalFile(null); if (journalInputRef.current) journalInputRef.current.value = '' }}
+                  className="text-slate-500 hover:text-red-400 flex-shrink-0 p-1 mr-auto">
+                  <X className="w-4 h-4" />
+                </span>
+              )}
             </button>
+
+            <div className="flex items-center gap-2 -mt-1 bg-slate-800/50 border border-slate-700 rounded-xl px-3 focus-within:border-emerald-500">
+              <Link2 className="w-4 h-4 text-slate-500 flex-shrink-0" />
+              <input type="url" dir="ltr" value={journalLink} onChange={e => setJournalLink(e.target.value)}
+                placeholder="أو الصق رابط شيت جوجل — https://docs.google.com/spreadsheets/d/..."
+                className="flex-1 min-w-0 bg-transparent py-2.5 text-sm text-white placeholder:text-slate-500 outline-none" />
+              {journalLink && (
+                <button onClick={() => { setJournalLink(''); saveLink(LINK_KEYS.journal, '') }} className="text-slate-500 hover:text-red-400 p-1">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
 
             <button onClick={() => openingInputRef.current?.click()}
               className={cn('w-full flex items-center gap-4 border-2 border-dashed rounded-xl p-5 text-right transition-colors',
@@ -152,7 +229,23 @@ export default function UploadPage() {
               )}
             </button>
 
-            <button onClick={process} disabled={!journalFile}
+            <div className="flex items-center gap-2 -mt-1 bg-slate-800/50 border border-slate-700 rounded-xl px-3 focus-within:border-emerald-500">
+              <Link2 className="w-4 h-4 text-slate-500 flex-shrink-0" />
+              <input type="url" dir="ltr" value={openingLink} onChange={e => setOpeningLink(e.target.value)}
+                placeholder="أو الصق رابط شيت الرصيد الافتتاحي (اختياري)"
+                className="flex-1 min-w-0 bg-transparent py-2.5 text-sm text-white placeholder:text-slate-500 outline-none" />
+              {openingLink && (
+                <button onClick={() => { setOpeningLink(''); saveLink(LINK_KEYS.opening, '') }} className="text-slate-500 hover:text-red-400 p-1">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            <p className="text-slate-500 text-xs px-1">
+              لاستخدام شيت جوجل: من الشيت اضغط «مشاركة» ← «أي شخص لديه الرابط» (عارض)، ثم انسخ الرابط هنا. الملف المرفق له الأولوية على الرابط.
+            </p>
+
+            <button onClick={process} disabled={!journalSource}
               className="w-full py-3 rounded-xl font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white transition-colors">
               رفع ومعالجة الملفات
             </button>

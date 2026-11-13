@@ -1,6 +1,6 @@
 import {
   JournalLine, Account, AccountType, FinancialSummary, MonthlyData, CategoryBreakdown,
-  PeriodFilter, BalanceSheetLine, BalanceSheetSection,
+  PeriodFilter, BalanceSheetLine, BalanceSheetSection, CashFlowLine, CashFlowSection, IndirectCashFlow,
 } from './types'
 
 const ARABIC_MONTHS = [
@@ -233,6 +233,132 @@ export function calcBalanceSheet(entries: JournalLine[], accounts: Account[], as
   lines.push({ id: 'combined-liab-equity', label: 'إجمالي الالتزامات وحقوق الملكية', code: null, section: 'liabilities', isTotal: true, amount: combined, asOfDate, depth: 0 })
 
   return lines
+}
+
+export const OPENING_BALANCE_DOC_TYPE = 'رصيد افتتاحي'
+
+// The opening-balance entry only sets up starting balances — it is never a cash receipt/payment
+// or a balance change for the period, no matter which date inside the period it carries.
+export function isOpeningBalanceLine(e: JournalLine): boolean {
+  return e.docType === OPENING_BALANCE_DOC_TYPE
+}
+
+// Lines that make up the starting position for a period: everything before it, plus the
+// opening-balance entry if it falls on or before the period end.
+export function linesBeforePeriod(entries: JournalLine[], period: PeriodFilter): JournalLine[] {
+  return entries.filter(e => e.entryDate < period.startDate || (isOpeningBalanceLine(e) && e.entryDate <= period.endDate))
+}
+
+// Real movements inside the period (opening-balance entry excluded).
+export function flowLinesInPeriod(entries: JournalLine[], period: PeriodFilter): JournalLine[] {
+  return entries.filter(e => e.entryDate >= period.startDate && e.entryDate <= period.endDate && !isOpeningBalanceLine(e))
+}
+
+// قائمة التدفقات النقدية — الطريقة غير المباشرة. Starts from صافي الربح and explains where it went
+// via each balance-sheet account's change. Sections and line groupings come from دليل الحسابات's
+// own tree: under الأصول/الخصوم, a level-2 group named "...المتداولة" is working capital (operating),
+// any other group is investing (assets) / financing (liabilities); حقوق الملكية is financing. Each
+// line is the group's direct child (e.g. 1110 العملاء) with its sub-accounts listed under it.
+// Double entry guarantees net profit + every non-cash account's change = the change in cash.
+export function calcIndirectCashFlow(
+  entries: JournalLine[], accounts: Account[], period: PeriodFilter, cashCodes: Set<number>,
+): IndirectCashFlow {
+  const byCode = new Map(accounts.map(a => [a.code, a]))
+  const ancestry = (code: number): Account[] => {
+    const chain: Account[] = []
+    let cur = byCode.get(code)
+    for (let guard = 0; cur && guard < 20; guard++) {
+      chain.unshift(cur)
+      cur = cur.parentCode !== null ? byCode.get(cur.parentCode) : undefined
+    }
+    return chain // [root, level-2 group, ..., account]
+  }
+
+  const classify = (code: number): { section: CashFlowSection; group: Account } | null => {
+    const chain = ancestry(code)
+    const account = chain[chain.length - 1]
+    if (!account) return null
+    if (account.type === 'حقوق ملكية') return { section: 'financing', group: chain[1] ?? account }
+    const groupOf = chain[1]
+    // A leaf sitting directly under the root (e.g. an account auto-added from the opening-balance
+    // file) has no group to read — treated as working capital.
+    const isUngroupedLeaf = chain.length <= 2 && !accounts.some(a => a.parentCode === account.code)
+    const isCurrent = !groupOf || isUngroupedLeaf
+      || (groupOf.name.includes('متداول') && !groupOf.name.includes('غير'))
+    const section: CashFlowSection = isCurrent ? 'operating' : account.type === 'أصول' ? 'investing' : 'financing'
+    return { section, group: chain[2] ?? account }
+  }
+
+  const flows = flowLinesInPeriod(entries, period)
+  const before = linesBeforePeriod(entries, period)
+
+  const cashDelta = (lines: JournalLine[]) =>
+    lines.filter(e => cashCodes.has(e.accountCode)).reduce((s, e) => s + e.debit - e.credit, 0)
+  const openingCash = cashDelta(before)
+  const closingCash = openingCash + cashDelta(flows)
+
+  const plFlows = flows.filter(e => e.accountType === 'إيرادات' || e.accountType === 'مصروفات')
+  const netProfit = sumByType(plFlows, 'إيرادات') - sumByType(plFlows, 'مصروفات')
+
+  // Depreciation-type entries: an expense debited against a non-current (investing) asset in the
+  // same entry. That part of the asset's decrease is a non-cash expense, so it's added back under
+  // operating and taken out of the investing line — otherwise it would look like cash from selling assets.
+  const depByCode = new Map<number, number>()
+  let depreciation = 0
+  const byEntry = new Map<number, JournalLine[]>()
+  for (const e of flows) byEntry.set(e.entryNumber, [...(byEntry.get(e.entryNumber) ?? []), e])
+  for (const lines of byEntry.values()) {
+    const expenseDebit = lines.filter(e => e.accountType === 'مصروفات').reduce((s, e) => s + e.debit, 0)
+    const assetCredits = lines.filter(e => e.accountType === 'أصول' && e.credit > 0 && !cashCodes.has(e.accountCode)
+      && classify(e.accountCode)?.section === 'investing')
+    const assetCredit = assetCredits.reduce((s, e) => s + e.credit, 0)
+    const dep = Math.min(expenseDebit, assetCredit)
+    if (dep <= 0) continue
+    depreciation += dep
+    for (const e of assetCredits) depByCode.set(e.accountCode, (depByCode.get(e.accountCode) ?? 0) + dep * e.credit / assetCredit)
+  }
+
+  // Cash effect of each non-cash balance-sheet account: credit − debit (an asset going up uses
+  // cash, a liability/equity going up provides it), minus any depreciation already added back.
+  const effectByCode = new Map<number, number>()
+  for (const e of flows) {
+    if (cashCodes.has(e.accountCode) || e.accountType === 'إيرادات' || e.accountType === 'مصروفات') continue
+    effectByCode.set(e.accountCode, (effectByCode.get(e.accountCode) ?? 0) + e.credit - e.debit)
+  }
+  for (const [code, dep] of depByCode) effectByCode.set(code, (effectByCode.get(code) ?? 0) - dep)
+
+  const sections: Record<CashFlowSection, Map<number, CashFlowLine>> = { operating: new Map(), investing: new Map(), financing: new Map() }
+  for (const [code, amount] of effectByCode) {
+    if (Math.abs(amount) < 0.005) continue
+    const c = classify(code)
+    const account = byCode.get(code)
+    if (!c || !account) continue
+    const line = sections[c.section].get(c.group.code)
+      ?? { code: c.group.code, name: c.group.name, accountType: c.group.type, amount: 0, children: [] }
+    line.amount += amount
+    line.children.push({ code, name: account.name, amount })
+    sections[c.section].set(c.group.code, line)
+  }
+
+  const finish = (m: Map<number, CashFlowLine>) => Array.from(m.values())
+    .filter(l => Math.abs(l.amount) >= 0.005 || l.children.length > 0)
+    .map(l => ({ ...l, children: l.children.length > 1 || l.children.some(ch => ch.code !== l.code) ? l.children.sort((a, b) => a.code - b.code) : [] }))
+    .sort((a, b) => a.code - b.code)
+  const operating = finish(sections.operating)
+  const investing = finish(sections.investing)
+  const financing = finish(sections.financing)
+  const total = (ls: CashFlowLine[]) => ls.reduce((s, l) => s + l.amount, 0)
+
+  const operatingTotal = netProfit + depreciation + total(operating)
+  const investingTotal = total(investing)
+  const financingTotal = total(financing)
+
+  return {
+    netProfit, depreciation, operating, investing, financing,
+    operatingTotal, investingTotal, financingTotal,
+    netChange: operatingTotal + investingTotal + financingTotal,
+    openingCash, closingCash,
+  }
 }
 
 export function formatCurrency(amount: number): string {

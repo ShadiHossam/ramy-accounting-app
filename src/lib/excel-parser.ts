@@ -62,7 +62,42 @@ function findHeaderRow(rows: unknown[][], marker: string): { idx: number; hmap: 
   return { idx, hmap }
 }
 
-// كود الحساب | اسم الحساب | نوع الحساب | الحساب الرئيسي | المستوى | الحالة
+function firstCol(hmap: Map<string, number>, ...names: string[]): number | undefined {
+  for (const n of names) {
+    const c = hmap.get(n)
+    if (c !== undefined) return c
+  }
+  return undefined
+}
+
+function asCode(v: unknown): number | null {
+  if (isNum(v)) return v
+  if (typeof v === 'string' && /^\s*\d+\s*$/.test(v)) return Number(v)
+  return null
+}
+
+// The newer chart layout marks each row only as Group/Account (no أصول/خصوم column), so the
+// account's type comes from the root of its tree — by the root's own name, falling back to the
+// standard chart-of-accounts leading digit (1 أصول · 2 خصوم · 3 حقوق ملكية · 4 إيرادات · 5 مصروفات).
+function inferTypeFromRoot(code: number, name: string): AccountType | null {
+  const n = stripTatweel(name)
+  if (n.includes('حقوق')) return 'حقوق ملكية'
+  if (n.includes('أصول') || n.includes('اصول')) return 'أصول'
+  if (n.includes('خصوم') || n.includes('التزامات')) return 'خصوم'
+  if (n.includes('إيراد') || n.includes('ايراد')) return 'إيرادات'
+  if (n.includes('مصروف') || n.includes('تكاليف')) return 'مصروفات'
+  const byDigit: Record<string, AccountType> = { '1': 'أصول', '2': 'خصوم', '3': 'حقوق ملكية', '4': 'إيرادات', '5': 'مصروفات' }
+  return byDigit[String(code)[0]] ?? null
+}
+
+function isGroupMarker(v: unknown): boolean {
+  return /^(group|account)$/i.test(String(v ?? '').trim())
+}
+
+// Two chart layouts are accepted:
+//   old: كود الحساب | اسم الحساب | نوع الحساب (أصول/خصوم/…) | الحساب الرئيسي | المستوى | الحالة
+//   new: كود الحساب | اسم الحساب | النوع (Group/Account) | كود الأب
+// In the new one the tree is fully explicit via كود الأب, so level and type are derived from it.
 function parseAccounts(ws: XLSX.WorkSheet, errors: string[]): ParsedAccount[] {
   const rows = sheetRows(ws)
   const header = findHeaderRow(rows, 'كود الحساب')
@@ -74,39 +109,81 @@ function parseAccounts(ws: XLSX.WorkSheet, errors: string[]): ParsedAccount[] {
 
   const codeCol = hmap.get('كود الحساب')
   const nameCol = hmap.get('اسم الحساب')
-  const typeCol = hmap.get('نوع الحساب')
-  const parentCol = hmap.get('الحساب الرئيسي')
+  const typeCol = firstCol(hmap, 'نوع الحساب', 'النوع')
+  const parentCol = firstCol(hmap, 'الحساب الرئيسي', 'كود الأب', 'كود الاب', 'كود الحساب الأب', 'كود الحساب الاب')
   const levelCol = hmap.get('المستوى')
   if (codeCol === undefined || nameCol === undefined || typeCol === undefined) {
-    errors.push('أعمدة أساسية مفقودة في شيت "دليل الحسابات" (كود الحساب / اسم الحساب / نوع الحساب) — تأكد من عدم إعادة تسميتها')
+    errors.push('أعمدة أساسية مفقودة في شيت "دليل الحسابات" (كود الحساب / اسم الحساب / نوع الحساب أو النوع) — تأكد من عدم إعادة تسميتها')
     return []
   }
 
   const accounts: ParsedAccount[] = []
+  const untyped = new Set<number>()
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i] as unknown[]
-    const code = row?.[codeCol]
-    if (!isNum(code)) continue
+    const code = asCode(row?.[codeCol])
+    if (code === null) continue
 
-    const type = String(row?.[typeCol] ?? '').trim() as AccountType
-    if (!ACCOUNT_TYPES.includes(type)) {
-      errors.push(`الحساب ${code} له نوع غير معروف: "${row?.[typeCol]}" — تم تجاهله`)
+    const rawType = row?.[typeCol]
+    const typeText = String(rawType ?? '').trim() as AccountType
+    let type: AccountType | null = null
+    if (ACCOUNT_TYPES.includes(typeText)) type = typeText
+    else if (!isGroupMarker(rawType)) {
+      errors.push(`الحساب ${code} له نوع غير معروف: "${rawType}" — تم تجاهله`)
       continue
     }
 
-    const parentRaw = parentCol !== undefined ? row?.[parentCol] : undefined
-    const parentCode = isNum(parentRaw) ? parentRaw : null
+    const parentCode = parentCol !== undefined ? asCode(row?.[parentCol]) : null
 
+    if (type === null) untyped.add(code)
     accounts.push({
       code,
       name: String(row?.[nameCol] ?? '').trim(),
-      type,
-      parentCode,
-      level: levelCol !== undefined && isNum(row?.[levelCol]) ? row[levelCol] : 1,
+      type: (type ?? 'أصول') as AccountType,
+      parentCode: parentCode === code ? null : parentCode,
+      level: levelCol !== undefined && isNum(row?.[levelCol]) ? row[levelCol] : 0,
     })
   }
-  resolveHierarchyByCode(accounts)
-  return accounts
+
+  const byCode = new Map(accounts.map(a => [a.code, a]))
+  const rootOf = (acc: ParsedAccount): ParsedAccount => {
+    let cur = acc
+    for (let guard = 0; cur.parentCode !== null && byCode.has(cur.parentCode) && guard < 20; guard++) cur = byCode.get(cur.parentCode)!
+    return cur
+  }
+
+  for (const acc of accounts) {
+    if (acc.parentCode !== null && !byCode.has(acc.parentCode)) {
+      errors.push(`الحساب ${acc.code} "${acc.name}": كود الأب ${acc.parentCode} غير موجود في دليل الحسابات — تم اعتباره حساباً رئيسياً`)
+      acc.parentCode = null
+    }
+  }
+  for (const acc of accounts) {
+    if (!untyped.has(acc.code)) continue
+    const root = rootOf(acc)
+    const type = inferTypeFromRoot(root.code, root.name)
+    if (!type) {
+      errors.push(`تعذر تحديد نوع الحساب ${acc.code} "${acc.name}" من الحساب الرئيسي "${root.name}" — تم تجاهله`)
+      continue
+    }
+    acc.type = type
+  }
+  const typed = accounts.filter(a => !untyped.has(a.code) || inferTypeFromRoot(rootOf(a).code, rootOf(a).name))
+
+  // Old charts carry an explicit المستوى; the new layout doesn't, so depth comes from the parent chain.
+  for (const acc of typed) {
+    if (acc.level > 0) continue
+    let level = 1
+    let cur: ParsedAccount | undefined = acc
+    for (let guard = 0; cur && cur.parentCode !== null && guard < 20; guard++) {
+      level++
+      cur = byCode.get(cur.parentCode)
+    }
+    acc.level = level
+  }
+
+  resolveHierarchyByCode(typed)
+  return typed
 }
 
 function isDescendantOf(code: number, ancestor: number, byCode: Map<number, ParsedAccount>): boolean {
@@ -171,7 +248,7 @@ function parseJournal(ws: XLSX.WorkSheet, accountsByCode: Map<number, ParsedAcco
     entryNumber: hmap.get('رقم القيد'),
     entryDate: hmap.get('تاريخ القيد'),
     postingDate: hmap.get('تاريخ الترحيل'),
-    refNumber: hmap.get('رقم المرجع'),
+    refNumber: firstCol(hmap, 'رقم المرجع', 'المرجع'),
     docType: hmap.get('نوع المستند'),
     description: hmap.get('البيان'),
     accountCode: hmap.get('كود الحساب'),
@@ -262,8 +339,13 @@ function parseOpeningBalance(
   ws: XLSX.WorkSheet,
   accountsByCode: Map<number, ParsedAccount>,
   errors: string[]
-): { extraAccounts: ParsedAccount[]; lines: { accountCode: number; amount: number }[]; asOfDate: Date | null } {
+): { extraAccounts: ParsedAccount[]; lines: { accountCode: number; amount: number }[]; openingDate: Date | null } {
   const rows = sheetRows(ws)
+
+  const table = findHeaderRow(rows, 'كود الحساب')
+  if (table && [...table.hmap.keys()].some(k => k.startsWith('الرصيد'))) {
+    return parseOpeningBalanceTable(rows, table, accountsByCode, errors)
+  }
 
   let asOfDate: Date | null = null
   for (const row of rows) {
@@ -276,8 +358,11 @@ function parseOpeningBalance(
   }
   if (!asOfDate) {
     errors.push('تعذر إيجاد تاريخ "قائمة المركز المالى" في عنوان شيت الرصيد الافتتاحي — تم تجاهل الملف')
-    return { extraAccounts: [], lines: [], asOfDate: null }
+    return { extraAccounts: [], lines: [], openingDate: null }
   }
+  // Old layout: the title date is the START of the period ("قائمة المركز المالى فى 1-8-2026"),
+  // so the opening entry sits the day before it.
+  const openingDate = new Date(asOfDate.getFullYear(), asOfDate.getMonth(), asOfDate.getDate() - 1)
 
   const extraAccounts: ParsedAccount[] = []
   const lines: { accountCode: number; amount: number }[] = []
@@ -340,7 +425,85 @@ function parseOpeningBalance(
     lines.push({ accountCode: code, amount })
   }
 
-  return { extraAccounts, lines, asOfDate }
+  return { extraAccounts, lines, openingDate }
+}
+
+// New layout — the balance sheet is the chart of accounts itself with a balance column:
+//   كود الحساب | اسم الحساب | نوع الحساب (Group/Account) | كود الحساب الأب | الرصيد في 31-08-2026
+// Only Account rows are posted; Group rows are the sheet's own subtotals and are only used to
+// cross-check (a mismatch is reported, never corrected). The header date is the END-of-day balance,
+// so the opening entry carries that exact date (the journal starts the next day).
+function parseOpeningBalanceTable(
+  rows: unknown[][],
+  { idx: headerIdx, hmap }: { idx: number; hmap: Map<string, number> },
+  accountsByCode: Map<number, ParsedAccount>,
+  errors: string[]
+): { extraAccounts: ParsedAccount[]; lines: { accountCode: number; amount: number }[]; openingDate: Date | null } {
+  const codeCol = hmap.get('كود الحساب')!
+  const nameCol = hmap.get('اسم الحساب')
+  const typeCol = firstCol(hmap, 'نوع الحساب', 'النوع')
+  const parentCol = firstCol(hmap, 'كود الحساب الأب', 'كود الحساب الاب', 'كود الأب', 'كود الاب', 'الحساب الرئيسي')
+  const balanceKey = [...hmap.keys()].find(k => k.startsWith('الرصيد'))!
+  const amountCol = hmap.get(balanceKey)!
+
+  const m = balanceKey.match(/(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/) ?? balanceKey.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/)
+  if (!m) {
+    errors.push(`تعذر قراءة التاريخ من عمود "${balanceKey}" في شيت الرصيد الافتتاحي — تم تجاهل الملف`)
+    return { extraAccounts: [], lines: [], openingDate: null }
+  }
+  const openingDate = m[1].length === 4
+    ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+    : new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]))
+
+  const extraAccounts: ParsedAccount[] = []
+  const lines: { accountCode: number; amount: number }[] = []
+  const groups: { code: number; name: string; amount: number }[] = []
+
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i] as unknown[]
+    const code = asCode(row?.[codeCol])
+    if (code === null) continue
+    const name = nameCol !== undefined ? String(row?.[nameCol] ?? '').trim() : String(code)
+    const amount = row?.[amountCol]
+    const isGroup = typeCol !== undefined && /^group$/i.test(String(row?.[typeCol] ?? '').trim())
+
+    if (isGroup) {
+      if (isNum(amount)) groups.push({ code, name, amount })
+      continue
+    }
+    if (!isNum(amount) || Math.abs(amount) < 0.005) continue
+
+    let account = accountsByCode.get(code)
+    if (!account) {
+      const declaredParent = parentCol !== undefined ? asCode(row?.[parentCol]) : null
+      const parent = declaredParent !== null && declaredParent !== code ? accountsByCode.get(declaredParent) : undefined
+      const type = parent?.type ?? inferTypeFromRoot(code, '')
+      if (!type) {
+        errors.push(`تعذر تصنيف الحساب "${name}" (كود ${code}) في الرصيد الافتتاحي — تم تجاهله`)
+        continue
+      }
+      const root = Array.from(accountsByCode.values()).find(a => a.level === 1 && a.type === type)
+      const parentAcc = parent ?? root
+      account = { code, name, type, parentCode: parentAcc ? parentAcc.code : null, level: parentAcc ? parentAcc.level + 1 : 1 }
+      accountsByCode.set(code, account)
+      extraAccounts.push(account)
+      errors.push(`الحساب "${name}" (كود ${code}) غير موجود في دليل الحسابات — تمت إضافته تلقائياً تحت "${parentAcc?.name ?? '-'}" برصيد افتتاحي ${amount.toLocaleString('ar-EG')}`)
+    }
+    lines.push({ accountCode: code, amount })
+  }
+
+  // Cross-check every Group subtotal in the sheet against the Account rows beneath it in the chart.
+  for (const g of groups) {
+    if (!accountsByCode.has(g.code)) continue
+    const sum = lines
+      .filter(l => isDescendantOf(l.accountCode, g.code, accountsByCode))
+      .reduce((s, l) => s + l.amount, 0)
+    if (Math.abs(sum - g.amount) > 0.01) {
+      errors.push(`مجموع "${g.name}" (كود ${g.code}) في الملف = ${g.amount.toLocaleString('ar-EG')} لا يساوي مجموع حساباته = ${sum.toLocaleString('ar-EG')} — تم احتساب الحسابات فقط`)
+    }
+  }
+
+  return { extraAccounts, lines, openingDate }
 }
 
 // Turns a "قائمة المركز المالى" workbook into: (a) any account codes it uses that aren't in the
@@ -361,20 +524,21 @@ export function parseOpeningBalanceFile(file: File, existingAccounts: ParsedAcco
         const errors: string[] = []
         const accountsByCode = new Map(existingAccounts.map(a => [a.code, a]))
 
-        const bsWs = wb.Sheets['قائمة المركز المالى']
+        const bsName = wb.SheetNames.find(n => stripTatweel(n) === 'قائمة المركز المالى')
+          ?? wb.SheetNames.find(n => stripTatweel(n).startsWith('قائمة المركز'))
+          ?? (wb.SheetNames.length === 1 ? wb.SheetNames[0] : undefined)
+        const bsWs = bsName ? wb.Sheets[bsName] : undefined
         if (!bsWs) {
           errors.push('لم يتم العثور على شيت "قائمة المركز المالى" في ملف الرصيد الافتتاحي')
           resolve({ extraAccounts: [], openingLines: [], errors })
           return
         }
 
-        const { extraAccounts, lines, asOfDate } = parseOpeningBalance(bsWs, accountsByCode, errors)
-        if (!asOfDate || lines.length === 0) {
+        const { extraAccounts, lines, openingDate } = parseOpeningBalance(bsWs, accountsByCode, errors)
+        if (!openingDate || lines.length === 0) {
           resolve({ extraAccounts, openingLines: [], errors })
           return
         }
-
-        const openingDate = new Date(asOfDate.getFullYear(), asOfDate.getMonth(), asOfDate.getDate() - 1)
 
         const openingLines: ParsedJournalLine[] = lines.map(({ accountCode, amount }) => {
           const account = accountsByCode.get(accountCode)!

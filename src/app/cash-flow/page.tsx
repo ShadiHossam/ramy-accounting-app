@@ -2,17 +2,19 @@
 import { useMemo, useState, useEffect, useCallback } from 'react'
 import AppShell from '@/components/layout/AppShell'
 import { useFinancialStore } from '@/store/financial-store'
-import { filterByPeriod, formatCurrency } from '@/lib/financial-engine'
+import { flowLinesInPeriod, linesBeforePeriod, calcIndirectCashFlow, formatCurrency } from '@/lib/financial-engine'
+import { CashFlowLine } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import ExportButton from '@/components/ui/ExportButton'
 import { Info } from 'lucide-react'
+import CodeBadge from '@/components/ui/CodeBadge'
 
 const CASH_ACCOUNTS_KEY = 'ramy-cash-accounts'
 
 export default function CashFlowPage() {
   const { accounts, entries, period } = useFinancialStore()
-  const filtered = useMemo(() => filterByPeriod(entries, period), [entries, period])
+  const [view, setView] = useState<'indirect' | 'direct'>('indirect')
 
   // Which أصول accounts represent actual cash/bank is a judgment the chart of accounts doesn't
   // encode (nothing marks "الخزينة"/"QNB" as cash vs. "العملاء"/"المخزون" as not) — so the app
@@ -39,8 +41,11 @@ export default function CashFlowPage() {
   }, [])
 
   const selectedSet = useMemo(() => new Set(selected), [selected])
-  const cashInPeriod = useMemo(() => filtered.filter(e => selectedSet.has(e.accountCode)), [filtered, selectedSet])
-  const cashBeforePeriod = useMemo(() => entries.filter(e => selectedSet.has(e.accountCode) && e.entryDate < period.startDate), [entries, selectedSet, period])
+  // The opening-balance entry is the starting cash position, never a receipt — it goes into
+  // رصيد أول المدة even when its date falls inside the selected period.
+  const cashInPeriod = useMemo(() => flowLinesInPeriod(entries, period).filter(e => selectedSet.has(e.accountCode)), [entries, period, selectedSet])
+  const cashBeforePeriod = useMemo(() => linesBeforePeriod(entries, period).filter(e => selectedSet.has(e.accountCode)), [entries, period, selectedSet])
+  const indirect = useMemo(() => calcIndirectCashFlow(entries, accounts, period, selectedSet), [entries, accounts, period, selectedSet])
 
   const openingBalance = useMemo(() => cashBeforePeriod.reduce((s, e) => s + (e.debit - e.credit), 0), [cashBeforePeriod])
   const cashIn = useMemo(() => cashInPeriod.reduce((s, e) => s + e.debit, 0), [cashInPeriod])
@@ -73,7 +78,30 @@ export default function CashFlowPage() {
   }, [cashInPeriod, openingBalance])
 
   const cashFlowExcelSheets = useMemo(() => [{
-    name: 'التدفق النقدي',
+    name: 'الطريقة غير المباشرة',
+    data: [
+      ['قائمة التدفقات النقدية - الطريقة غير المباشرة', period.label],
+      [],
+      ['التدفقات النقدية من الأنشطة التشغيلية', ''],
+      ['صافي الربح', indirect.netProfit],
+      ...(indirect.depreciation ? [['+ الإهلاك (مصروف غير نقدي)', indirect.depreciation]] : []),
+      ...sectionRows(indirect.operating),
+      ['صافي التدفق النقدي من الأنشطة التشغيلية', indirect.operatingTotal],
+      [],
+      ['التدفقات النقدية من الأنشطة الاستثمارية', ''],
+      ...sectionRows(indirect.investing),
+      ['صافي التدفق النقدي من الأنشطة الاستثمارية', indirect.investingTotal],
+      [],
+      ['التدفقات النقدية من الأنشطة التمويلية', ''],
+      ...sectionRows(indirect.financing),
+      ['صافي التدفق النقدي من الأنشطة التمويلية', indirect.financingTotal],
+      [],
+      ['صافي التغير في النقدية', indirect.netChange],
+      ['رصيد النقدية أول المدة', indirect.openingCash],
+      ['رصيد النقدية آخر المدة', indirect.openingCash + indirect.netChange],
+    ] as (string | number | null)[][]
+  }, {
+    name: 'حركات النقدية',
     data: [
       ['قائمة حركة النقدية', period.label],
       [],
@@ -86,7 +114,7 @@ export default function CashFlowPage() {
       ['التاريخ', 'البيان', 'نوع المستند', 'مدين', 'دائن', 'الرصيد بعد الحركة'],
       ...transactions.map(t => [t.entryDate.toLocaleDateString('ar-EG'), t.description, t.docType, t.debit || null, t.credit || null, t.runningBalance]),
     ] as (string | number | null)[][]
-  }], [period.label, openingBalance, cashIn, cashOut, netChange, closingBalance, transactions])
+  }], [period.label, indirect, openingBalance, cashIn, cashOut, netChange, closingBalance, transactions])
 
   if (cashCandidates.length === 0) {
     return (
@@ -123,9 +151,19 @@ export default function CashFlowPage() {
           </div>
         ) : (
           <>
-            <div className="flex justify-end">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex bg-gray-100 rounded-lg p-1">
+                {([['indirect', 'الطريقة غير المباشرة'], ['direct', 'الحركات التفصيلية']] as const).map(([key, label]) => (
+                  <button key={key} onClick={() => setView(key)}
+                    className={cn('px-4 py-1.5 rounded-md text-sm font-medium transition-colors', view === key ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
+                    {label}
+                  </button>
+                ))}
+              </div>
               <ExportButton exportId="cashflow-export-area" filename="قائمة-التدفق-النقدي" excelSheets={cashFlowExcelSheets} />
             </div>
+
+            {view === 'indirect' ? <IndirectStatement cf={indirect} periodLabel={period.label} /> : <>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white rounded-xl border border-gray-100 p-5 text-center">
@@ -191,9 +229,132 @@ export default function CashFlowPage() {
                 </table>
               </div>
             </div>
+            </>}
           </>
         )}
       </div>
     </AppShell>
+  )
+}
+
+function sectionRows(lines: CashFlowLine[]): (string | number)[][] {
+  return lines.flatMap(l => [
+    [`${changeLabel(l)} — ${l.code} ${l.name}`, l.amount],
+    ...l.children.map(c => [`      ${c.code} ${c.name}`, c.amount]),
+  ])
+}
+
+// An asset going up uses cash (amount < 0); a liability/equity going up provides it (amount > 0).
+function changeLabel(l: CashFlowLine): string {
+  const increased = l.accountType === 'أصول' ? l.amount < 0 : l.amount > 0
+  return increased ? 'زيادة' : 'نقص'
+}
+
+function Amount({ value, bold }: { value: number; bold?: boolean }) {
+  return (
+    <span className={cn('text-sm tabular-nums min-w-[140px] text-left', bold ? 'font-bold' : 'font-medium', value < 0 ? 'text-red-600' : 'text-gray-900')}>
+      {value < 0 ? `(${formatCurrency(Math.abs(value))})` : formatCurrency(value)}
+    </span>
+  )
+}
+
+function FlowLines({ lines }: { lines: CashFlowLine[] }) {
+  return <>
+    {lines.map(l => (
+      <div key={l.code} className="py-1.5">
+        <div className="flex justify-between items-center">
+          <span className="text-sm text-gray-700"><CodeBadge code={l.code} />{changeLabel(l)} {l.name}</span>
+          <Amount value={l.amount} />
+        </div>
+        {l.children.map(c => (
+          <div key={c.code} className="flex justify-between items-center pr-8 py-0.5">
+            <span className="text-xs text-gray-400"><CodeBadge code={c.code} />{c.name}</span>
+            <span className={cn('text-xs tabular-nums', c.amount < 0 ? 'text-red-400' : 'text-gray-400')}>
+              {c.amount < 0 ? `(${formatCurrency(Math.abs(c.amount))})` : formatCurrency(c.amount)}
+            </span>
+          </div>
+        ))}
+      </div>
+    ))}
+  </>
+}
+
+function SectionTotal({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex justify-between items-center py-3 border-t border-gray-200 mt-1">
+      <span className="text-sm font-bold text-gray-900">{label}</span>
+      <Amount value={value} bold />
+    </div>
+  )
+}
+
+function IndirectStatement({ cf, periodLabel }: { cf: ReturnType<typeof calcIndirectCashFlow>; periodLabel: string }) {
+  const computedClosing = cf.openingCash + cf.netChange
+  const diff = cf.closingCash - computedClosing
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 p-6 space-y-6">
+      <div>
+        <h2 className="text-lg font-bold text-gray-900">قائمة التدفقات النقدية — الطريقة غير المباشرة</h2>
+        <p className="text-gray-400 text-sm">{periodLabel} · تبدأ من صافي الربح وتوضح أين ذهب، مجمّعة حسب دليل الحسابات</p>
+      </div>
+
+      <div>
+        <h3 className="text-sm font-bold text-gray-900 mb-2">التدفقات النقدية من الأنشطة التشغيلية</h3>
+        <div className="flex justify-between items-center py-1.5">
+          <span className="text-sm font-semibold text-gray-800">صافي الربح</span>
+          <Amount value={cf.netProfit} />
+        </div>
+        {Math.abs(cf.depreciation) >= 0.005 && (
+          <div className="flex justify-between items-center py-1.5">
+            <span className="text-sm text-gray-700">+ الإهلاك (مصروف غير نقدي)</span>
+            <Amount value={cf.depreciation} />
+          </div>
+        )}
+        {cf.operating.length > 0 && <p className="text-xs text-gray-400 mt-2 mb-1">التغير في رأس المال العامل</p>}
+        <FlowLines lines={cf.operating} />
+        <SectionTotal label="صافي التدفق النقدي من الأنشطة التشغيلية" value={cf.operatingTotal} />
+      </div>
+
+      <div>
+        <h3 className="text-sm font-bold text-gray-900 mb-2">التدفقات النقدية من الأنشطة الاستثمارية</h3>
+        {cf.investing.length === 0 && <p className="text-xs text-gray-400 py-1.5">لا توجد حركات خلال الفترة</p>}
+        <FlowLines lines={cf.investing} />
+        <SectionTotal label="صافي التدفق النقدي من الأنشطة الاستثمارية" value={cf.investingTotal} />
+      </div>
+
+      <div>
+        <h3 className="text-sm font-bold text-gray-900 mb-2">التدفقات النقدية من الأنشطة التمويلية</h3>
+        {cf.financing.length === 0 && <p className="text-xs text-gray-400 py-1.5">لا توجد حركات خلال الفترة</p>}
+        <FlowLines lines={cf.financing} />
+        <SectionTotal label="صافي التدفق النقدي من الأنشطة التمويلية" value={cf.financingTotal} />
+      </div>
+
+      <div className="bg-gray-50 rounded-lg px-4 py-2">
+        <div className="flex justify-between items-center py-1.5">
+          <span className="text-sm font-bold text-gray-900">صافي التغير في النقدية</span>
+          <Amount value={cf.netChange} bold />
+        </div>
+        <div className="flex justify-between items-center py-1.5">
+          <span className="text-sm text-gray-700">رصيد النقدية أول المدة</span>
+          <Amount value={cf.openingCash} />
+        </div>
+        <div className="flex justify-between items-center py-2 border-t border-gray-200">
+          <span className="text-base font-bold text-gray-900">رصيد النقدية آخر المدة</span>
+          <Amount value={computedClosing} bold />
+        </div>
+      </div>
+
+      {Math.abs(diff) > 1 ? (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+          <p className="text-red-600 text-sm font-medium">
+            رصيد حسابات النقدية الفعلي {formatCurrency(cf.closingCash)} يختلف عن القائمة بفارق {formatCurrency(Math.abs(diff))} — يوجد قيد غير متوازن في الملف الأصلي
+          </p>
+        </div>
+      ) : (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+          <p className="text-emerald-600 text-sm font-medium">✓ رصيد آخر المدة مطابق لرصيد حسابات النقدية والبنوك</p>
+        </div>
+      )}
+    </div>
   )
 }

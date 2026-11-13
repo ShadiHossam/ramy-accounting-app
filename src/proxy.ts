@@ -7,7 +7,8 @@ import { SESSION_COOKIE, verifySessionToken } from '@/lib/auth'
 const PUBLIC_PATHS = ['/', '/upload', '/login', '/api/auth/login']
 
 const isPublic = (pathname: string, method: string) =>
-  PUBLIC_PATHS.includes(pathname) || (pathname === '/api/financial-data' && method === 'POST')
+  PUBLIC_PATHS.includes(pathname) ||
+  ((pathname === '/api/financial-data' || pathname === '/api/sheet-import') && method === 'POST')
 
 export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl

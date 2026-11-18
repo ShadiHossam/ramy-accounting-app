@@ -97,9 +97,15 @@ export default function UploadPage() {
       let entries: ParsedJournalLine[] = journal.entries
       let allErrors = [...journal.errors]
 
-      if (openingSource) {
+      // A separately attached opening file wins; otherwise a "قائمة المركز المالى" sheet inside the
+      // journal workbook itself is used as the opening balance (one-workbook upload).
+      const openingFromJournal = !openingSource && !!journal.hasOpeningSheet
+
+      if (openingSource || openingFromJournal) {
         let openingInput: File
-        if (typeof openingSource === 'string') {
+        if (!openingSource) {
+          openingInput = journalInput
+        } else if (typeof openingSource === 'string') {
           setMessage('جاري تحميل شيت الرصيد الافتتاحي من جوجل...')
           openingInput = await fetchSheetAsFile(openingSource, 'opening.xlsx')
           saveLink(LINK_KEYS.opening, openingSource)
@@ -126,7 +132,7 @@ export default function UploadPage() {
           entries: entries.map(e => ({ ...e, entryDate: e.entryDate.toISOString(), postingDate: e.postingDate.toISOString() })),
           // Only a freshly-attached opening balance file should evict the previously stored one —
           // a journal-only re-upload must leave it in place.
-          replaceOpeningBalance: !!openingSource,
+          replaceOpeningBalance: !!openingSource || openingFromJournal,
         }),
       })
 
@@ -219,7 +225,7 @@ export default function UploadPage() {
               <Wallet className={cn('w-8 h-8 flex-shrink-0', openingFile ? 'text-emerald-400' : 'text-slate-500')} />
               <div className="min-w-0 flex-1">
                 <p className="text-white font-semibold">ملف الرصيد الافتتاحي (اختياري)</p>
-                <p className="text-slate-400 text-sm truncate">{openingFile ? openingFile.name : 'شيت "قائمة المركز المالى" — أرصدة الحسابات قبل بداية قيود اليومية'}</p>
+                <p className={cn('text-slate-400 text-sm', openingFile && 'truncate')}>{openingFile ? openingFile.name : 'شيت "قائمة المركز المالى" — غير مطلوب إذا كان الشيت موجوداً داخل ملف قيود اليومية نفسه'}</p>
               </div>
               {openingFile && (
                 <span onClick={(e) => { e.stopPropagation(); setOpeningFile(null); if (openingInputRef.current) openingInputRef.current.value = '' }}

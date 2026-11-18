@@ -10,6 +10,14 @@ export interface ParseResult {
   accounts: ParsedAccount[]
   entries: ParsedJournalLine[]
   errors: string[]
+  // True when the same workbook also carries a "قائمة المركز المالى" sheet, so it can double as the
+  // opening-balance file (one-workbook upload).
+  hasOpeningSheet?: boolean
+}
+
+function findOpeningSheetName(names: string[]): string | undefined {
+  return names.find(n => stripTatweel(n) === 'قائمة المركز المالى')
+    ?? names.find(n => stripTatweel(n).startsWith('قائمة المركز'))
 }
 
 function isNum(v: unknown): v is number {
@@ -524,8 +532,7 @@ export function parseOpeningBalanceFile(file: File, existingAccounts: ParsedAcco
         const errors: string[] = []
         const accountsByCode = new Map(existingAccounts.map(a => [a.code, a]))
 
-        const bsName = wb.SheetNames.find(n => stripTatweel(n) === 'قائمة المركز المالى')
-          ?? wb.SheetNames.find(n => stripTatweel(n).startsWith('قائمة المركز'))
+        const bsName = findOpeningSheetName(wb.SheetNames)
           ?? (wb.SheetNames.length === 1 ? wb.SheetNames[0] : undefined)
         const bsWs = bsName ? wb.Sheets[bsName] : undefined
         if (!bsWs) {
@@ -602,7 +609,7 @@ export function parseExcelFile(file: File): Promise<ParseResult> {
           errors.push('لم يتم العثور على بيانات صالحة في الملف')
         }
 
-        resolve({ accounts, entries, errors })
+        resolve({ accounts, entries, errors, hasOpeningSheet: !!findOpeningSheetName(wb.SheetNames) })
       } catch (err) {
         resolve({ accounts: [], entries: [], errors: [String(err)] })
       }

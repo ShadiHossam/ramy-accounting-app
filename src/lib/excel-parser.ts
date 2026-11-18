@@ -98,6 +98,8 @@ function inferTypeFromRoot(code: number, name: string): AccountType | null {
   return byDigit[String(code)[0]] ?? null
 }
 
+const CHART_CODE_HEADERS = ['كود الحساب', 'الكود المقترح', 'الكود', 'رقم الحساب']
+
 function isGroupMarker(v: unknown): boolean {
   return /^(group|account)$/i.test(String(v ?? '').trim())
 }
@@ -108,14 +110,16 @@ function isGroupMarker(v: unknown): boolean {
 // In the new one the tree is fully explicit via كود الأب, so level and type are derived from it.
 function parseAccounts(ws: XLSX.WorkSheet, errors: string[]): ParsedAccount[] {
   const rows = sheetRows(ws)
-  const header = findHeaderRow(rows, 'كود الحساب')
+  // The code column has been renamed in the client's own files (e.g. "الكود المقترح"), so the
+  // header row is located by "اسم الحساب" and the code column accepts the known alternatives.
+  const header = findHeaderRow(rows, 'اسم الحساب') ?? findHeaderRow(rows, 'كود الحساب')
   if (!header) {
-    errors.push('تعذر إيجاد صف رؤوس الأعمدة (كود الحساب) في شيت "دليل الحسابات"')
+    errors.push('تعذر إيجاد صف رؤوس الأعمدة (اسم الحساب) في شيت "دليل الحسابات"')
     return []
   }
   const { idx: headerIdx, hmap } = header
 
-  const codeCol = hmap.get('كود الحساب')
+  const codeCol = firstCol(hmap, ...CHART_CODE_HEADERS)
   const nameCol = hmap.get('اسم الحساب')
   const typeCol = firstCol(hmap, 'نوع الحساب', 'النوع')
   const parentCol = firstCol(hmap, 'الحساب الرئيسي', 'كود الأب', 'كود الاب', 'كود الحساب الأب', 'كود الحساب الاب')
@@ -609,7 +613,9 @@ export function parseExcelFile(file: File): Promise<ParseResult> {
           errors.push('لم يتم العثور على بيانات صالحة في الملف')
         }
 
-        resolve({ accounts, entries, errors, hasOpeningSheet: !!findOpeningSheetName(wb.SheetNames) })
+        // Exact name only: workbooks also carry snapshot sheets like "قائمة المركز المالى 30 سبتمبر"
+        // that must not be mistaken for the opening balance.
+        resolve({ accounts, entries, errors, hasOpeningSheet: wb.SheetNames.some(n => stripTatweel(n).trim() === 'قائمة المركز المالى') })
       } catch (err) {
         resolve({ accounts: [], entries: [], errors: [String(err)] })
       }

@@ -99,7 +99,8 @@ export default function UploadPage() {
 
       // A separately attached opening file wins; otherwise a "قائمة المركز المالى" sheet inside the
       // journal workbook itself is used as the opening balance (one-workbook upload).
-      const openingFromJournal = !openingSource && !!journal.hasOpeningSheet
+      // Reset below if the sheet yields no lines, so a broken sheet never wipes the stored opening balance.
+      let openingFromJournal = !openingSource && !!journal.hasOpeningSheet
 
       if (openingSource || openingFromJournal) {
         let openingInput: File
@@ -120,6 +121,7 @@ export default function UploadPage() {
         // on top of them, exactly like they would in the physical books.
         entries = [...opening.openingLines, ...entries]
         allErrors = [...allErrors, ...opening.errors]
+        if (openingFromJournal && opening.openingLines.length === 0) openingFromJournal = false
       }
 
       setMessage('جاري حفظ البيانات في قاعدة البيانات...')

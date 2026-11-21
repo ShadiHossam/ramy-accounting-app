@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { AccountType } from '@/lib/types'
 import { replaceLedger } from '@/lib/ledger-store'
+import { forgetSyncedData } from '@/lib/sheet-sync'
 
 export async function GET() {
   const [accountRows, entryRows] = await Promise.all([
@@ -43,5 +44,6 @@ export async function DELETE() {
     prisma.journalLine.deleteMany(),
     prisma.account.deleteMany(),
   ])
+  await forgetSyncedData()
   return NextResponse.json({ success: true })
 }

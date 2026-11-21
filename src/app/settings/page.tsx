@@ -39,7 +39,7 @@ export default function SettingsPage() {
                 <p className="text-gray-400 text-xs">{entries.length.toLocaleString('ar-EG')} سطر قيد محمّل</p>
               </div>
               <button onClick={async () => {
-                if (confirm('هل أنت متأكد من حذف كل البيانات؟')) await clear()
+                if (confirm('حذف كل البيانات من السيستم (الحسابات والقيود والرصيد الافتتاحي)؟\n\nهتقدر تسحبها تاني من الشيت في أي وقت.')) await clear()
               }} className="flex items-center gap-2 text-red-500 hover:text-red-700 text-sm border border-red-200 hover:border-red-400 px-3 py-1.5 rounded-lg transition-colors">
                 <Trash2 className="w-4 h-4" />
                 حذف الكل

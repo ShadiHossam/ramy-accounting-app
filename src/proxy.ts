@@ -3,13 +3,12 @@ import type { NextRequest } from 'next/server'
 import { SESSION_COOKIE, verifySessionToken } from '@/lib/auth'
 
 // Uploading a file is open to anyone; seeing what's already stored (every other page, reading or
-// deleting the data, the AI routes) needs a login. POST /api/sheet-sync does its own check
-// (session or the cron's SYNC_TOKEN) inside the route.
+// deleting the data, the AI routes) needs a login.
 const PUBLIC_PATHS = ['/', '/upload', '/login', '/api/auth/login']
 
 const isPublic = (pathname: string, method: string) =>
   PUBLIC_PATHS.includes(pathname) ||
-  ((pathname === '/api/financial-data' || pathname === '/api/sheet-import' || pathname === '/api/sheet-sync') && method === 'POST')
+  ((pathname === '/api/financial-data' || pathname === '/api/sheet-import') && method === 'POST')
 
 export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl

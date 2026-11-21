@@ -518,108 +518,121 @@ function parseOpeningBalanceTable(
   return { extraAccounts, lines, openingDate }
 }
 
-// Turns a "قائمة المركز المالى" workbook into: (a) any account codes it uses that aren't in the
-// main دليل الحسابات yet, and (b) one opening journal entry (entry #0) dated the day before the
-// stated as-of date, so it sits chronologically before every real transaction and its balances
-// simply accumulate into whatever those transactions add on top — no merging/reconciliation logic,
-// just another (earlier) entry in the same ledger.
-export function parseOpeningBalanceFile(file: File, existingAccounts: ParsedAccount[]): Promise<OpeningBalanceResult> {
-  return new Promise((resolve) => {
-    const reader = new FileReader()
-    reader.onerror = () => {
-      resolve({ extraAccounts: [], openingLines: [], errors: ['فشل في قراءة ملف الرصيد الافتتاحي'] })
+function readOpeningFromWorkbook(wb: XLSX.WorkBook, existingAccounts: ParsedAccount[], sheetName: string | undefined): OpeningBalanceResult {
+  const errors: string[] = []
+  const accountsByCode = new Map(existingAccounts.map(a => [a.code, a]))
+  const bsWs = sheetName ? wb.Sheets[sheetName] : undefined
+  if (!bsWs) {
+    errors.push('لم يتم العثور على شيت "قائمة المركز المالى" في ملف الرصيد الافتتاحي')
+    return { extraAccounts: [], openingLines: [], errors }
+  }
+
+  const { extraAccounts, lines, openingDate } = parseOpeningBalance(bsWs, accountsByCode, errors)
+  if (!openingDate || lines.length === 0) return { extraAccounts, openingLines: [], errors }
+
+  const openingLines: ParsedJournalLine[] = lines.map(({ accountCode, amount }) => {
+    const account = accountsByCode.get(accountCode)!
+    const isDebitNormal = account.type === 'أصول' || account.type === 'مصروفات'
+    const debit = isDebitNormal ? Math.max(amount, 0) : Math.max(-amount, 0)
+    const credit = isDebitNormal ? Math.max(-amount, 0) : Math.max(amount, 0)
+    return {
+      entryNumber: 0,
+      entryDate: openingDate,
+      postingDate: openingDate,
+      refNumber: 'OB',
+      docType: 'رصيد افتتاحي',
+      description: 'رصيد افتتاحي',
+      accountCode,
+      accountName: account.name,
+      accountType: account.type,
+      costCenter: '',
+      debit, credit,
+      approvalStatus: '',
     }
+  })
+
+  const totalDebit = openingLines.reduce((s, l) => s + l.debit, 0)
+  const totalCredit = openingLines.reduce((s, l) => s + l.credit, 0)
+  if (Math.abs(totalDebit - totalCredit) > 0.01) {
+    errors.push(`الرصيد الافتتاحي غير متوازن: مدين ${totalDebit.toLocaleString('ar-EG')} ≠ دائن ${totalCredit.toLocaleString('ar-EG')} (الملف الأصلي نفسه غير متوازن بهذا الفارق) — تم استيراده كما هو دون أي تعديل`)
+  }
+
+  return { extraAccounts, openingLines, errors }
+}
+
+// Exact name only: workbooks also carry snapshot sheets like "قائمة المركز المالى 30 سبتمبر"
+// that must not be mistaken for the opening balance.
+const exactOpeningSheet = (names: string[]) => names.find(n => stripTatweel(n).trim() === 'قائمة المركز المالى')
+
+function readJournalWorkbook(wb: XLSX.WorkBook): ParseResult {
+  const errors: string[] = []
+
+  const accountsWs = wb.Sheets['دليل الحسابات']
+  const accounts = accountsWs ? parseAccounts(accountsWs, errors) : []
+  if (!accountsWs) errors.push('لم يتم العثور على شيت "دليل الحسابات" في الملف')
+
+  const accountsByCode = new Map(accounts.map(a => [a.code, a]))
+
+  const journalWs = wb.Sheets['قيود اليومية']
+  const entries = journalWs ? parseJournal(journalWs, accountsByCode, errors) : []
+  if (!journalWs) errors.push('لم يتم العثور على شيت "قيود اليومية" في الملف')
+
+  if (accounts.length === 0 && entries.length === 0) {
+    errors.push('لم يتم العثور على بيانات صالحة في الملف')
+  }
+
+  return { accounts, entries, errors, hasOpeningSheet: !!exactOpeningSheet(wb.SheetNames) }
+}
+
+function readFileAsWorkbook(file: File): Promise<XLSX.WorkBook> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('read failed'))
     reader.onload = (e) => {
       try {
-        const data = e.target?.result
-        const wb = XLSX.read(data, { type: 'array', cellDates: true })
-        const errors: string[] = []
-        const accountsByCode = new Map(existingAccounts.map(a => [a.code, a]))
-
-        const bsName = findOpeningSheetName(wb.SheetNames)
-          ?? (wb.SheetNames.length === 1 ? wb.SheetNames[0] : undefined)
-        const bsWs = bsName ? wb.Sheets[bsName] : undefined
-        if (!bsWs) {
-          errors.push('لم يتم العثور على شيت "قائمة المركز المالى" في ملف الرصيد الافتتاحي')
-          resolve({ extraAccounts: [], openingLines: [], errors })
-          return
-        }
-
-        const { extraAccounts, lines, openingDate } = parseOpeningBalance(bsWs, accountsByCode, errors)
-        if (!openingDate || lines.length === 0) {
-          resolve({ extraAccounts, openingLines: [], errors })
-          return
-        }
-
-        const openingLines: ParsedJournalLine[] = lines.map(({ accountCode, amount }) => {
-          const account = accountsByCode.get(accountCode)!
-          const isDebitNormal = account.type === 'أصول' || account.type === 'مصروفات'
-          const debit = isDebitNormal ? Math.max(amount, 0) : Math.max(-amount, 0)
-          const credit = isDebitNormal ? Math.max(-amount, 0) : Math.max(amount, 0)
-          return {
-            entryNumber: 0,
-            entryDate: openingDate,
-            postingDate: openingDate,
-            refNumber: 'OB',
-            docType: 'رصيد افتتاحي',
-            description: 'رصيد افتتاحي',
-            accountCode,
-            accountName: account.name,
-            accountType: account.type,
-            costCenter: '',
-            debit, credit,
-            approvalStatus: '',
-          }
-        })
-
-        const totalDebit = openingLines.reduce((s, l) => s + l.debit, 0)
-        const totalCredit = openingLines.reduce((s, l) => s + l.credit, 0)
-        if (Math.abs(totalDebit - totalCredit) > 0.01) {
-          errors.push(`الرصيد الافتتاحي غير متوازن: مدين ${totalDebit.toLocaleString('ar-EG')} ≠ دائن ${totalCredit.toLocaleString('ar-EG')} (الملف الأصلي نفسه غير متوازن بهذا الفارق) — تم استيراده كما هو دون أي تعديل`)
-        }
-
-        resolve({ extraAccounts, openingLines, errors })
+        resolve(XLSX.read(e.target?.result, { type: 'array', cellDates: true }))
       } catch (err) {
-        resolve({ extraAccounts: [], openingLines: [], errors: [String(err)] })
+        reject(err)
       }
     }
     reader.readAsArrayBuffer(file)
   })
 }
 
-export function parseExcelFile(file: File): Promise<ParseResult> {
-  return new Promise((resolve) => {
-    const reader = new FileReader()
-    reader.onerror = () => {
-      resolve({ accounts: [], entries: [], errors: ['فشل في قراءة الملف. تأكد من أن الملف غير تالف وحاول مرة أخرى'] })
-    }
-    reader.onload = (e) => {
-      try {
-        const data = e.target?.result
-        const wb = XLSX.read(data, { type: 'array', cellDates: true })
-        const errors: string[] = []
+// Turns a "قائمة المركز المالى" workbook into: (a) any account codes it uses that aren't in the
+// main دليل الحسابات yet, and (b) one opening journal entry (entry #0), so it sits chronologically
+// before every real transaction and its balances simply accumulate into whatever those
+// transactions add on top.
+export async function parseOpeningBalanceFile(file: File, existingAccounts: ParsedAccount[]): Promise<OpeningBalanceResult> {
+  try {
+    const wb = await readFileAsWorkbook(file)
+    const name = findOpeningSheetName(wb.SheetNames) ?? (wb.SheetNames.length === 1 ? wb.SheetNames[0] : undefined)
+    return readOpeningFromWorkbook(wb, existingAccounts, name)
+  } catch (err) {
+    return { extraAccounts: [], openingLines: [], errors: [err instanceof Error && err.message === 'read failed' ? 'فشل في قراءة ملف الرصيد الافتتاحي' : String(err)] }
+  }
+}
 
-        const accountsWs = wb.Sheets['دليل الحسابات']
-        const accounts = accountsWs ? parseAccounts(accountsWs, errors) : []
-        if (!accountsWs) errors.push('لم يتم العثور على شيت "دليل الحسابات" في الملف')
+export async function parseExcelFile(file: File): Promise<ParseResult> {
+  try {
+    return readJournalWorkbook(await readFileAsWorkbook(file))
+  } catch (err) {
+    return { accounts: [], entries: [], errors: [err instanceof Error && err.message === 'read failed' ? 'فشل في قراءة الملف. تأكد من أن الملف غير تالف وحاول مرة أخرى' : String(err)] }
+  }
+}
 
-        const accountsByCode = new Map(accounts.map(a => [a.code, a]))
-
-        const journalWs = wb.Sheets['قيود اليومية']
-        const entries = journalWs ? parseJournal(journalWs, accountsByCode, errors) : []
-        if (!journalWs) errors.push('لم يتم العثور على شيت "قيود اليومية" في الملف')
-
-        if (accounts.length === 0 && entries.length === 0) {
-          errors.push('لم يتم العثور على بيانات صالحة في الملف')
-        }
-
-        // Exact name only: workbooks also carry snapshot sheets like "قائمة المركز المالى 30 سبتمبر"
-        // that must not be mistaken for the opening balance.
-        resolve({ accounts, entries, errors, hasOpeningSheet: wb.SheetNames.some(n => stripTatweel(n).trim() === 'قائمة المركز المالى') })
-      } catch (err) {
-        resolve({ accounts: [], entries: [], errors: [String(err)] })
-      }
-    }
-    reader.readAsArrayBuffer(file)
-  })
+// Server-side entry point (Google Sheet sync): one workbook carrying the chart, the journal and,
+// optionally, an exact "قائمة المركز المالى" opening-balance sheet.
+export function parseLedgerWorkbook(data: ArrayBuffer | Uint8Array): ParseResult & { openingLines: number } {
+  const wb = XLSX.read(data, { type: 'array', cellDates: true })
+  const journal = readJournalWorkbook(wb)
+  if (!journal.hasOpeningSheet || journal.accounts.length === 0) return { ...journal, openingLines: 0 }
+  const opening = readOpeningFromWorkbook(wb, journal.accounts, exactOpeningSheet(wb.SheetNames))
+  return {
+    accounts: [...journal.accounts, ...opening.extraAccounts],
+    entries: [...opening.openingLines, ...journal.entries],
+    errors: [...journal.errors, ...opening.errors],
+    hasOpeningSheet: true,
+    openingLines: opening.openingLines.length,
+  }
 }

@@ -7,6 +7,7 @@ import {
 import { Calendar, ChevronDown, Menu } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { cn } from '@/lib/utils'
+import SheetSyncButton from './SheetSyncButton'
 
 const ARABIC_MONTHS = [
   'يناير', 'فبراير', 'مارس', 'إبريل', 'مايو', 'يونيو',
@@ -53,6 +54,8 @@ export default function Header({ title, onMenuClick }: Props) {
         <h2 className="text-lg sm:text-xl font-bold text-gray-900 truncate">{title}</h2>
       </div>
 
+      <div className="flex items-center gap-2 flex-shrink-0">
+      <SheetSyncButton />
       <div className="relative flex-shrink-0" ref={ref}>
         <button
           onClick={() => setOpen(!open)}
@@ -131,6 +134,7 @@ export default function Header({ title, onMenuClick }: Props) {
             </div>
           </div>
         )}
+      </div>
       </div>
     </header>
   )

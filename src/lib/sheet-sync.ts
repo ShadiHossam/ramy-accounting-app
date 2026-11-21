@@ -6,10 +6,10 @@ import { parseLedgerWorkbook } from '@/lib/excel-parser'
 import { replaceLedger } from '@/lib/ledger-store'
 
 // Keeps the stored ledger in step with the client's Google Sheet (GOOGLE_SHEET_URL), which they
-// keep up to date as their single source of truth. Run by a server cron every 15 minutes and by
+// keep up to date as their single source of truth. Run by a daily server cron (06:07 Cairo) and by
 // the "مزامنة" button. Every sync is a full replace (same as an upload), but:
 //   - an unreachable / unparsable sheet never wipes the stored data — the old data stays;
-//   - an unchanged sheet is skipped, so the cron doesn't rewrite the DB every 15 minutes.
+//   - an unchanged sheet is skipped, so a re-run does not rewrite the DB for nothing.
 
 export interface SyncStatus {
   configured: boolean

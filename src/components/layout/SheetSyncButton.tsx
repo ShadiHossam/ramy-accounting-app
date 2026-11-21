@@ -76,7 +76,7 @@ export default function SheetSyncButton() {
       {open && (
         <div className="absolute left-0 mt-2 w-[calc(100vw-2rem)] sm:w-96 max-w-96 bg-white border border-gray-200 rounded-xl shadow-lg z-50 p-4 text-sm space-y-3">
           <p className="font-semibold text-gray-900">المزامنة مع شيت جوجل</p>
-          <p className="text-gray-600">البيانات بتتحدث تلقائياً من الشيت كل ١٥ دقيقة.</p>
+          <p className="text-gray-600">البيانات بتتحدث تلقائياً من الشيت مرة يومياً (٦ الصبح)، ولو عايز تحدّث فوراً اضغط "مزامنة الآن".</p>
           <div className="text-gray-600 space-y-1">
             <p>آخر فحص: {ago(status.lastCheckedAt)}</p>
             <p>آخر تغيير في البيانات: {ago(status.lastSyncedAt)}</p>
